@@ -1,0 +1,37 @@
+{
+  "query": "central bank rate decision",
+  "results": [
+    {
+      "title": "Fed holds rates steady",
+      "url": "https://www.reuters.com/markets/us/fed-holds-rates-2026-10-01/",
+      "content": "The Federal Reserve held its benchmark rate steady on Wednesday.",
+      "score": 0.91,
+      "published_date": "Wed, 01 Oct 2026 18:04:00 GMT"
+    },
+    {
+      "title": "Rates explained",
+      "url": "https://www.bbc.co.uk/news/business-123",
+      "content": "What the decision means for <b>mortgages</b>.",
+      "score": 0.85,
+      "published_date": "2026-10-02T09:00:00Z"
+    },
+    {
+      "title": "Lookalike domain",
+      "url": "https://evilreuters.com/fed",
+      "content": "Should be dropped by the whitelist re-check.",
+      "score": 0.99
+    },
+    {
+      "title": "Userinfo trick",
+      "url": "https://reuters.com@attacker.example/fed",
+      "content": "Host is attacker.example; must be dropped.",
+      "score": 0.98
+    },
+    {
+      "title": "Off-list blog",
+      "url": "https://someblog.example/fed-take",
+      "content": "Not a trusted source.",
+      "score": 0.8
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "meta": {"count": 2, "page": 1, "per_page": 8},
+  "results": [
+    {
+      "id": "https://openalex.org/W2741809807",
+      "doi": "https://doi.org/10.1038/s41586-020-2649-2",
+      "display_name": "Array programming with <i>NumPy</i>",
+      "publication_date": "2020-09-16",
+      "authorships": [
+        {"author": {"id": "https://openalex.org/A1", "display_name": "Charles R. Harris"}},
+        {"author": {"id": "https://openalex.org/A2", "display_name": "K. Jarrod Millman"}},
+        {"author": {}}
+      ],
+      "primary_location": {
+        "landing_page_url": "https://www.nature.com/articles/s41586-020-2649-2",
+        "source": {"display_name": "Nature"}
+      },
+      "abstract_inverted_index": {
+        "Array": [0],
+        "programming": [1],
+        "provides": [2],
+        "a": [3],
+        "powerful": [4],
+        "syntax.": [5]
+      },
+      "cited_by_count": 15000,
+      "ids": {"pmid": "https://pubmed.ncbi.nlm.nih.gov/32939066"},
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W3000000001",
+      "doi": null,
+      "display_name": "A preprint about attention",
+      "publication_date": "2023-06-01",
+      "authorships": [],
+      "primary_location": {"landing_page_url": null, "source": null},
+      "abstract_inverted_index": null,
+      "cited_by_count": 3,
+      "ids": {},
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W3000000002",
+      "doi": null,
+      "display_name": null,
+      "publication_date": null,
+      "type": "article"
+    }
+  ]
+}

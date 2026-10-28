@@ -1,0 +1,104 @@
+# Trusted sources. Every adapter is registered by `id` (native) or covered by the
+# domain-restricted web search (search). Edit trust weights and toggles here; no code changes needed.
+#
+#   family: news | academic
+#   kind:   native (dedicated API adapter) | search (web search restricted to `domains`)
+#   trust:  0–1, multiplied into the ranking score
+
+sources:
+  # --- Academic: native APIs ---
+  - id: openalex
+    family: academic
+    kind: native
+    trust: 0.9
+    enabled: true
+    rate_limit_per_sec: 10
+
+  # --- News: domain-restricted search ---
+  - id: reuters
+    family: news
+    kind: search
+    domains: [reuters.com]
+    trust: 0.95
+  - id: apnews
+    family: news
+    kind: search
+    domains: [apnews.com]
+    trust: 0.95
+  - id: bbc
+    family: news
+    kind: search
+    domains: [bbc.com, bbc.co.uk]
+    trust: 0.9
+  - id: npr
+    family: news
+    kind: search
+    domains: [npr.org]
+    trust: 0.9
+  - id: guardian_web
+    family: news
+    kind: search
+    domains: [theguardian.com]
+    trust: 0.85
+  - id: nytimes_web
+    family: news
+    kind: search
+    domains: [nytimes.com]
+    trust: 0.85
+  - id: wsj
+    family: news
+    kind: search
+    domains: [wsj.com]
+    trust: 0.85
+  - id: ft
+    family: news
+    kind: search
+    domains: [ft.com]
+    trust: 0.85
+  - id: economist
+    family: news
+    kind: search
+    domains: [economist.com]
+    trust: 0.85
+  - id: bloomberg
+    family: news
+    kind: search
+    domains: [bloomberg.com]
+    trust: 0.85
+
+  # --- Academic: domain-restricted search ---
+  - id: nature
+    family: academic
+    kind: search
+    domains: [nature.com]
+    trust: 0.9
+  - id: science
+    family: academic
+    kind: search
+    domains: [science.org]
+    trust: 0.9
+  - id: lancet
+    family: academic
+    kind: search
+    domains: [thelancet.com]
+    trust: 0.9
+  - id: nejm
+    family: academic
+    kind: search
+    domains: [nejm.org]
+    trust: 0.9
+  - id: cell
+    family: academic
+    kind: search
+    domains: [cell.com]
+    trust: 0.85
+  - id: pnas
+    family: academic
+    kind: search
+    domains: [pnas.org]
+    trust: 0.85
+  - id: plos
+    family: academic
+    kind: search
+    domains: [plos.org]
+    trust: 0.8
