@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 class SourceConfig(BaseModel):
     id: str
     family: Family
-    kind: Literal["native", "search"]
+    kind: Literal["native", "search", "enrichment"]
     trust: float = Field(ge=0, le=1)
     enabled: bool = True
     rate_limit_per_sec: float | None = None
@@ -73,6 +73,9 @@ class SourcesConfig(BaseModel):
 
     def native(self) -> list[SourceConfig]:
         return [s for s in self.enabled() if s.kind == "native"]
+
+    def get(self, source_id: str) -> SourceConfig | None:
+        return next((s for s in self.enabled() if s.id == source_id), None)
 
     def search_sources(self, family: Family) -> list[SourceConfig]:
         return [s for s in self.enabled() if s.kind == "search" and s.family == family]

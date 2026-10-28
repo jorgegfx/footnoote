@@ -1,0 +1,20 @@
+# Minimal trust list for API tests: one native adapter, Crossref, and two search outlets.
+sources:
+  - id: openalex
+    family: academic
+    kind: native
+    trust: 0.9
+  - id: crossref
+    family: academic
+    kind: enrichment
+    trust: 0.9
+  - id: reuters
+    family: news
+    kind: search
+    domains: [reuters.com]
+    trust: 0.95
+  - id: nature
+    family: academic
+    kind: search
+    domains: [nature.com]
+    trust: 0.9

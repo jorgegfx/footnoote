@@ -13,14 +13,15 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
+from footnote.cache import TTLCache
 from footnote.config import Settings, SourcesConfig, get_settings, load_sources
 from footnote.graph.build import GraphDeps, SearchGraph, build_graph
 from footnote.graph.nodes.plan import EmptyPlanError
 from footnote.graph.state import GraphState
 from footnote.llm import LLMNotConfiguredError, ModelFactory, model_factory
 from footnote.models import Answer, Family
-from footnote.sources import build_adapters
-from footnote.sources.base import SourceAdapter, native_adapter_factory
+from footnote.sources import build_adapters, build_enricher, source_status
+from footnote.sources.base import SourceAdapter
 from footnote.sources.search.base import WebSearchProvider
 
 __version__ = version("footnote")
@@ -83,12 +84,14 @@ def create_app(
             timeout=httpx.Timeout(resolved.adapter_timeout_seconds),
             follow_redirects=True,
         ) as client:
-            adapters = build_adapters(resolved, sources, client, search_provider)
+            cache = TTLCache()
+            adapters = build_adapters(resolved, sources, client, search_provider, cache)
             graph = build_graph(
                 GraphDeps(
                     models=models or model_factory(resolved),
                     adapters=adapters,
                     adapter_timeout=resolved.adapter_timeout_seconds,
+                    enricher=build_enricher(resolved, sources, client, cache),
                 )
             )
             app.state.runtime = Runtime(resolved, sources, adapters, graph)
@@ -133,15 +136,13 @@ def create_app(
     async def health(request: Request) -> dict[str, Any]:
         runtime: Runtime = request.app.state.runtime
         s = runtime.settings
-        native = {
-            src.id: native_adapter_factory(src.id) is not None for src in runtime.sources.native()
-        }
-        search_ok = any(a.id.endswith("_search") for a in runtime.adapters)
+        active = {a.id for a in runtime.adapters}
+        search = {f"{f.value}_search": f"{f.value}_search" in active for f in Family}
         return {
             "status": "ok",
             "version": __version__,
             "llm_configured": bool(s.llm_provider and s.llm_model_fast and s.llm_model_strong),
-            "sources": {**native, "news_search": search_ok, "academic_search": search_ok},
+            "sources": {**source_status(s, runtime.sources), **search},
         }
 
     return app

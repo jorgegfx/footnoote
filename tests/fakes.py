@@ -16,7 +16,11 @@ from footnote.models import Family, QueryPlan, SourceResult
 
 
 class FakeChatModel(BaseChatModel):
-    """Returns scripted text replies and scripted structured outputs, recording every call."""
+    """Returns scripted text replies and structured outputs, recording every call.
+
+    `with_structured_output(Schema)` returns the first queued item that is a `Schema`, so
+    tests needn't care which node asks first.
+    """
 
     texts: list[str] = Field(default_factory=list)
     structured: list[BaseModel] = Field(default_factory=list)
@@ -41,7 +45,8 @@ class FakeChatModel(BaseChatModel):
     ) -> Runnable[Any, Any]:
         def respond(messages: list[BaseMessage]) -> BaseModel:
             self.calls.append(list(messages))
-            return self.structured.pop(0)
+            match = next(i for i, item in enumerate(self.structured) if isinstance(item, schema))
+            return self.structured.pop(match)
 
         return RunnableLambda(respond)
 
@@ -70,6 +75,9 @@ class StaticAdapter:
         self.error = error
         self.delay = delay
         self.plans: list[QueryPlan] = []
+
+    def accepts(self, plan: QueryPlan) -> bool:
+        return bool(plan.queries.get(self.family))
 
     async def search(self, plan: QueryPlan) -> list[SourceResult]:
         self.plans.append(plan)

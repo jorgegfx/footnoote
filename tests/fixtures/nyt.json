@@ -1,0 +1,33 @@
+{
+  "status": "OK",
+  "copyright": "Copyright (c) 2026 The New York Times Company. All Rights Reserved.",
+  "response": {
+    "docs": [
+      {
+        "abstract": "The Federal Reserve kept interest rates unchanged and signaled patience.",
+        "web_url": "https://www.nytimes.com/2026/10/01/business/economy/fed-rates.html",
+        "snippet": "The Federal Reserve kept interest rates unchanged.",
+        "lead_paragraph": "Federal Reserve officials left rates unchanged on Wednesday.",
+        "source": "The New York Times",
+        "headline": {"main": "Fed Holds Rates Steady", "kicker": null, "print_headline": "Fed Waits"},
+        "pub_date": "2026-10-01T18:15:04+0000",
+        "byline": {"original": "By Jeanna Smialek"},
+        "section_name": "Business Day",
+        "document_type": "article"
+      },
+      {
+        "abstract": "",
+        "web_url": "https://www.nytimes.com/2026/10/02/opinion/rates.html",
+        "snippet": "",
+        "lead_paragraph": "An argument about rates.",
+        "source": "The New York Times",
+        "headline": {"main": "What the Fed Gets Wrong"},
+        "pub_date": "2026-10-02T09:00:00Z",
+        "byline": {"original": null},
+        "section_name": "Opinion",
+        "document_type": "article"
+      }
+    ],
+    "metadata": {"hits": 2, "offset": 0, "time": 20}
+  }
+}

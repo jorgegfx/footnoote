@@ -21,6 +21,7 @@ class QueryPlan(BaseModel):
     queries: dict[Family, list[str]]
     time_window: tuple[date, date] | None = None
     entities: list[str] = Field(default_factory=list)
+    biomedical: bool = False  # gates biomedical-only sources such as PubMed
 
     @property
     def families(self) -> list[Family]:

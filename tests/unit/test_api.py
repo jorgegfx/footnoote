@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from datetime import date
+from pathlib import Path
 
 import pytest
 import respx
@@ -7,11 +8,12 @@ from fastapi.testclient import TestClient
 
 from footnote.config import Settings
 from footnote.graph.nodes.plan import PlanOutput
+from footnote.graph.nodes.rank import RelevanceScore, RelevanceScores
 from footnote.main import create_app
 from footnote.models import Family
 from footnote.sources.academic.openalex import API_URL as OPENALEX_URL
 from footnote.sources.search.base import WebHit
-from tests.conftest import load_fixture
+from tests.conftest import FIXTURES, load_fixture
 from tests.fakes import FakeChatModel, fake_models
 
 
@@ -39,6 +41,15 @@ class FakeSearchProvider:
         ]
 
 
+def all_relevant(count: int) -> RelevanceScores:
+    return RelevanceScores(scores=[RelevanceScore(index=i, score=8) for i in range(1, count + 1)])
+
+
+@pytest.fixture
+def api_settings(settings: Settings) -> Settings:
+    return settings.model_copy(update={"sources_path": Path(FIXTURES / "sources.yaml")})
+
+
 @pytest.fixture
 def fast() -> FakeChatModel:
     return FakeChatModel()
@@ -50,8 +61,10 @@ def strong() -> FakeChatModel:
 
 
 @pytest.fixture
-def client(settings: Settings, fast: FakeChatModel, strong: FakeChatModel) -> Iterator[TestClient]:
-    app = create_app(settings, fake_models(fast, strong), FakeSearchProvider())
+def client(
+    api_settings: Settings, fast: FakeChatModel, strong: FakeChatModel
+) -> Iterator[TestClient]:
+    app = create_app(api_settings, fake_models(fast, strong), FakeSearchProvider())
     with respx.mock(assert_all_called=False) as mock:
         mock.get(OPENALEX_URL).respond(json=load_fixture("openalex_works.json"))
         with TestClient(app) as test_client:
@@ -62,7 +75,8 @@ def test_search_returns_cited_answer(
     client: TestClient, fast: FakeChatModel, strong: FakeChatModel
 ) -> None:
     fast.structured = [
-        PlanOutput(intent="both", news_queries=["numpy news"], academic_queries=["numpy"])
+        PlanOutput(intent="both", news_queries=["numpy news"], academic_queries=["numpy"]),
+        all_relevant(3),
     ]
     strong.texts = ["NumPy is widely used [1][3]."]
 
@@ -73,18 +87,21 @@ def test_search_returns_cited_answer(
     urls = [s["url"] for s in body["sources"]]
     assert "https://www.reuters.com/a" in urls
     assert "https://blog.example/b" not in urls
-    assert urls[0] == "https://www.reuters.com/a"  # highest trust first
-    assert "Array programming with NumPy" in [s["title"] for s in body["sources"]]  # HTML stripped
+    # Equal relevance, so trust × quality decides: the highly cited paper leads.
+    assert body["sources"][0]["title"] == "Array programming with NumPy"  # HTML stripped
     assert body["text"] == "NumPy is widely used [1][3]."
     assert [c["index"] for c in body["citations"]] == [1, 3]
     assert body["source_errors"] == {}
-    assert {"plan", "retrieve", "synthesize", "total", "source:openalex"} <= set(body["timings_ms"])
+    assert {"plan", "rank", "synthesize", "total", "source:openalex"} <= set(body["timings_ms"])
 
 
 def test_families_override_restricts_sources(
     client: TestClient, fast: FakeChatModel, strong: FakeChatModel
 ) -> None:
-    fast.structured = [PlanOutput(intent="both", news_queries=["n"], academic_queries=["a"])]
+    fast.structured = [
+        PlanOutput(intent="both", news_queries=["n"], academic_queries=["a"]),
+        all_relevant(1),
+    ]
     strong.texts = ["A story [1]."]
 
     response = client.post(
@@ -92,8 +109,7 @@ def test_families_override_restricts_sources(
     )
 
     assert response.status_code == 200
-    sources = response.json()["sources"]
-    assert [s["family"] for s in sources] == ["news"]
+    assert [s["family"] for s in response.json()["sources"]] == ["news"]
 
 
 @pytest.mark.parametrize(
@@ -121,8 +137,8 @@ def test_empty_plan_is_422_with_message(client: TestClient, fast: FakeChatModel)
     assert "rephrasing" in response.json()["detail"]
 
 
-def test_unconfigured_llm_is_503(settings: Settings) -> None:
-    app = create_app(settings, search_provider=FakeSearchProvider())
+def test_unconfigured_llm_is_503(api_settings: Settings) -> None:
+    app = create_app(api_settings, search_provider=FakeSearchProvider())
     with TestClient(app) as test_client:
         response = test_client.post("/api/search", json={"question": "valid question"})
     assert response.status_code == 503
@@ -138,4 +154,20 @@ def test_sources_and_health(client: TestClient) -> None:
     health = client.get("/health").json()
     assert health["status"] == "ok"
     assert health["llm_configured"] is False
-    assert health["sources"] == {"openalex": True, "news_search": True, "academic_search": True}
+    assert health["sources"] == {
+        "openalex": True,
+        "crossref": True,
+        "news_search": True,
+        "academic_search": True,
+    }
+
+
+def test_health_reports_missing_keys(settings: Settings) -> None:
+    """The shipped trust list: keyless sources are ready, keyed ones report False."""
+    with TestClient(create_app(settings, search_provider=FakeSearchProvider())) as test_client:
+        status = test_client.get("/health").json()["sources"]
+    assert status["openalex"]
+    assert status["pubmed"]
+    assert status["arxiv"]
+    assert status["guardian"] is False
+    assert status["nyt"] is False

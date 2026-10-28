@@ -1,0 +1,41 @@
+{
+  "response": {
+    "status": "ok",
+    "userTier": "developer",
+    "total": 2,
+    "startIndex": 1,
+    "pageSize": 2,
+    "currentPage": 1,
+    "pages": 1,
+    "orderBy": "relevance",
+    "results": [
+      {
+        "id": "business/2026/oct/01/bank-of-england-holds-rates",
+        "type": "article",
+        "sectionId": "business",
+        "sectionName": "Business",
+        "webPublicationDate": "2026-10-01T11:02:13Z",
+        "webTitle": "Bank of England holds interest rates at 4%",
+        "webUrl": "https://www.theguardian.com/business/2026/oct/01/bank-of-england-holds-rates",
+        "apiUrl": "https://content.guardianapis.com/business/2026/oct/01/bank-of-england-holds-rates",
+        "fields": {
+          "trailText": "Policymakers vote 6-3 to keep <strong>borrowing costs</strong> on hold",
+          "standfirst": "<p>Policymakers vote 6-3 to keep borrowing costs on hold as inflation stays above target</p>",
+          "byline": "Richard Partington"
+        },
+        "isHosted": false,
+        "pillarId": "pillar/news",
+        "pillarName": "News"
+      },
+      {
+        "id": "live/2026/oct/01/no-fields",
+        "type": "liveblog",
+        "sectionName": "Business",
+        "webPublicationDate": "2026-10-01T08:00:00Z",
+        "webTitle": "Markets live",
+        "webUrl": "https://www.theguardian.com/business/live/2026/oct/01/markets-live",
+        "isHosted": false
+      }
+    ]
+  }
+}

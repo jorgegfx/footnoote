@@ -3,7 +3,9 @@
 #
 #   family: news | academic
 #   kind:   native (dedicated API adapter) | search (web search restricted to `domains`)
+#           | enrichment (metadata lookups, not searched)
 #   trust:  0–1, multiplied into the ranking score
+#   rate_limit_per_sec: the provider's published limit (enforced from milestone 5)
 
 sources:
   # --- Academic: native APIs ---
@@ -11,8 +13,44 @@ sources:
     family: academic
     kind: native
     trust: 0.9
-    enabled: true
     rate_limit_per_sec: 10
+  - id: semantic_scholar
+    family: academic
+    kind: native
+    trust: 0.85
+    rate_limit_per_sec: 1        # shared pool without SEMANTIC_SCHOLAR_API_KEY is often throttled
+  - id: pubmed
+    family: academic
+    kind: native
+    trust: 0.9
+    rate_limit_per_sec: 3        # 10 with NCBI_API_KEY; only runs for biomedical questions
+  - id: arxiv
+    family: academic
+    kind: native
+    trust: 0.75                  # preprints; also discounted by ranking
+    rate_limit_per_sec: 0.33
+  - id: crossref
+    family: academic
+    kind: enrichment
+    trust: 0.9
+    rate_limit_per_sec: 10
+
+  # --- News: native APIs ---
+  - id: guardian
+    family: news
+    kind: native
+    trust: 0.85
+    rate_limit_per_sec: 1        # needs GUARDIAN_API_KEY
+  - id: nyt
+    family: news
+    kind: native
+    trust: 0.85
+    rate_limit_per_sec: 0.08     # 5/minute; needs NYT_API_KEY
+  - id: gdelt
+    family: news
+    kind: native
+    trust: 0.8                   # capped by the matched outlet's own trust
+    rate_limit_per_sec: 0.2      # one request per 5 seconds
 
   # --- News: domain-restricted search ---
   - id: reuters

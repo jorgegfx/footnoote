@@ -1,46 +1,89 @@
-"""Source adapter protocol, the native-adapter registry, and the never-raise wrapper."""
+"""Adapter protocol, native-adapter base class and registry, and the never-raise wrapper."""
 
 import asyncio
 import logging
 import time
+from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 import httpx
 
-from footnote.config import Settings, SourceConfig
+from footnote.config import Settings, SourceConfig, SourcesConfig
 from footnote.models import AdapterResult, Family, QueryPlan, SourceResult
 
 logger = logging.getLogger(__name__)
 
 
 class SourceAdapter(Protocol):
-    id: str
-    family: Family
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def family(self) -> Family: ...
+
+    def accepts(self, plan: QueryPlan) -> bool: ...
 
     async def search(self, plan: QueryPlan) -> list[SourceResult]: ...
 
 
-NativeAdapterFactory = Callable[[SourceConfig, Settings, httpx.AsyncClient], SourceAdapter]
+class AdapterError(Exception):
+    """Raised by adapters with a message that is safe to show users as-is."""
 
-_REGISTRY: dict[str, NativeAdapterFactory] = {}
+
+class NativeAdapter(ABC):
+    """Base for adapters backed by a source's own API."""
+
+    family: ClassVar[Family]
+    # Settings attribute holding a required API key; the adapter is skipped when it's unset.
+    requires_key: ClassVar[str | None] = None
+
+    def __init__(
+        self,
+        config: SourceConfig,
+        settings: Settings,
+        client: httpx.AsyncClient,
+        sources: SourcesConfig,
+    ):
+        self.id = config.id
+        self.trust = config.trust
+        self.settings = settings
+        self.client = client
+        self.sources = sources
+
+    @classmethod
+    def is_configured(cls, settings: Settings) -> bool:
+        return cls.requires_key is None or getattr(settings, cls.requires_key) is not None
+
+    def accepts(self, plan: QueryPlan) -> bool:
+        return bool(plan.queries.get(self.family))
+
+    @abstractmethod
+    async def search(self, plan: QueryPlan) -> list[SourceResult]: ...
 
 
-def register(source_id: str) -> Callable[[NativeAdapterFactory], NativeAdapterFactory]:
-    def decorator(factory: NativeAdapterFactory) -> NativeAdapterFactory:
-        _REGISTRY[source_id] = factory
-        return factory
+_REGISTRY: dict[str, type[NativeAdapter]] = {}
+
+
+def register[A: type[NativeAdapter]](source_id: str) -> Callable[[A], A]:
+    def decorator(cls: A) -> A:
+        _REGISTRY[source_id] = cls
+        return cls
 
     return decorator
 
 
-def native_adapter_factory(source_id: str) -> NativeAdapterFactory | None:
+def native_adapter_class(source_id: str) -> type[NativeAdapter] | None:
     return _REGISTRY.get(source_id)
 
 
 def describe_error(exc: BaseException) -> str:
     """A short, user-safe error. Never includes URLs, which can carry API keys."""
     match exc:
+        case AdapterError():
+            return str(exc)
+        case httpx.HTTPStatusError() if exc.response.status_code == 429:
+            return "rate limited"
         case httpx.HTTPStatusError():
             return f"HTTP {exc.response.status_code}"
         case httpx.TimeoutException():

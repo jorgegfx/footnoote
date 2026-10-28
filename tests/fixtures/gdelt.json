@@ -1,0 +1,34 @@
+{
+  "articles": [
+    {
+      "url": "https://www.reuters.com/markets/rates/fed-2026-10-01/",
+      "url_mobile": "",
+      "title": "Fed holds rates steady as inflation cools",
+      "seendate": "20261001T183000Z",
+      "socialimage": "",
+      "domain": "reuters.com",
+      "language": "English",
+      "sourcecountry": "United States"
+    },
+    {
+      "url": "https://apnews.com/article/fed-rates-abc123",
+      "url_mobile": "",
+      "title": "Federal Reserve leaves key rate unchanged",
+      "seendate": "20261001T190000Z",
+      "socialimage": "",
+      "domain": "apnews.com",
+      "language": "English",
+      "sourcecountry": "United States"
+    },
+    {
+      "url": "https://reuters.com.mirror.example/fed",
+      "url_mobile": "",
+      "title": "Mirror site",
+      "seendate": "20261001T190000Z",
+      "socialimage": "",
+      "domain": "reuters.com.mirror.example",
+      "language": "English",
+      "sourcecountry": "United States"
+    }
+  ]
+}

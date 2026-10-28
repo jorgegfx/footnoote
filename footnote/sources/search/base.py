@@ -41,6 +41,9 @@ class WebSearchAdapter:
         self.provider = provider
         self.sources = sources
 
+    def accepts(self, plan: QueryPlan) -> bool:
+        return bool(plan.queries.get(self.family))
+
     async def search(self, plan: QueryPlan) -> list[SourceResult]:
         domains = self.sources.search_domains(self.family)
         if not domains:

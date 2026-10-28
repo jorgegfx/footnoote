@@ -28,6 +28,9 @@ class PlanOutput(BaseModel):
     entities: list[str] = Field(default_factory=list, description="Key named entities.")
     time_start: date | None = Field(default=None, description="Start of an implied date range.")
     time_end: date | None = Field(default=None, description="End of an implied date range.")
+    biomedical: bool = Field(
+        default=False, description="True for medicine, health, biology or life-science questions."
+    )
 
 
 def make_plan_node(models: ModelFactory) -> Node:
@@ -83,6 +86,7 @@ def build_plan(
         queries=queries,
         time_window=time_window or _window(output.time_start, output.time_end),
         entities=_clean_queries(output.entities, limit=10),
+        biomedical=output.biomedical,
     )
 
 

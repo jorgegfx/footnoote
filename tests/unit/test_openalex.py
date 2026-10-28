@@ -21,7 +21,7 @@ PLAN = QueryPlan(intent="academic", queries={Family.ACADEMIC: ["numpy array prog
 @pytest.fixture
 async def adapter(settings: Settings, sources: SourcesConfig) -> OpenAlexAdapter:
     config = next(s for s in sources.native() if s.id == "openalex")
-    return OpenAlexAdapter(config, settings, httpx.AsyncClient())  # type: ignore[return-value]
+    return OpenAlexAdapter(config, settings, httpx.AsyncClient(), sources)
 
 
 @respx.mock
@@ -83,7 +83,7 @@ async def test_http_error_becomes_failed_result_without_leaking_key(
 ) -> None:
     keyed = settings.model_copy(update={"openalex_api_key": SecretStr("sk-secret-123")})
     config = next(s for s in sources.native() if s.id == "openalex")
-    adapter = OpenAlexAdapter(config, keyed, httpx.AsyncClient())
+    adapter = OpenAlexAdapter(config, keyed, httpx.AsyncClient(), sources)
     respx.get(API_URL).respond(status_code=503)
 
     outcome = await run_adapter(adapter, PLAN, limit_seconds=1)

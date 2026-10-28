@@ -22,18 +22,30 @@ class GraphState(TypedDict, total=False):
     time_window: NotRequired[tuple[date, date] | None]
     # Pipeline
     plan: QueryPlan
-    results: Annotated[list[SourceResult], operator.add]
-    ranked: list[SourceResult]
+    results: Annotated[list[SourceResult], operator.add]  # raw, appended by parallel sources
+    candidates: list[SourceResult]  # normalized, deduped, enriched
+    ranked: list[SourceResult]  # top results, in citation order
     answer: Answer
     # Observability; adapters write these in parallel, hence the reducers
     errors: Annotated[dict[str, str], merge_dicts]
     timings: Annotated[dict[str, int], merge_dicts]
 
 
+class SourceTask(TypedDict):
+    """Payload of the `Send` that runs one adapter."""
+
+    adapter_id: str
+    plan: QueryPlan
+
+
 class Node(Protocol):
     """Matches LangGraph's node protocol, which passes `state` by name."""
 
     def __call__(self, state: GraphState) -> Awaitable[dict[str, Any]]: ...
+
+
+class SourceNode(Protocol):
+    def __call__(self, state: SourceTask) -> Awaitable[dict[str, Any]]: ...
 
 
 def timed(name: str) -> Callable[[Node], Node]:

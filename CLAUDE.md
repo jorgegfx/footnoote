@@ -39,44 +39,46 @@ First version: a FastAPI backend with a LangGraph pipeline and a simple web UI.
 
 ```
 question
-  └─► plan ──► fan_out ──┬─► news_native      ─┐
-                         ├─► news_search_api   ├─► normalize ─► dedupe ─► rank ─► synthesize ─► verify ─► answer
-                         ├─► academic_native   │
-                         └─► academic_search  ─┘
+  └─► plan ──► fan_out ──┬─► source (openalex)     ─┐
+                         ├─► source (pubmed)       │
+                         ├─► source (news_search)  ├─► normalize ─► dedupe ─► enrich ─► rank ─► synthesize ─► verify ─► answer
+                         └─► source (…one per     ─┘
+                              accepting adapter)
 ```
 
-1. **plan** (`fast` LLM): classify the question (news / academic / both), extract entities and time window, produce 1–3 query rewrites per source family. Output: `QueryPlan`.
-2. **fan_out**: dispatch adapters in parallel using LangGraph `Send`. Only adapters relevant to the plan run.
-3. **adapters**: each returns `list[SourceResult]` or a typed failure. One slow or failing source must never fail the request (per-adapter timeout, default 8s).
-4. **normalize**: map everything to `SourceResult`, clean HTML to text, truncate snippets.
-5. **dedupe**: by canonical URL, DOI, arXiv ID, PMID, then near-duplicate titles (normalized string similarity). Syndicated news (same wire story on several outlets) collapses to one result that keeps all outlet URLs.
-6. **rank**: score = relevance (LLM or embedding similarity to the question) × trust weight (from config) × recency factor (news only; academic favors citation count and venue). Keep top N (default 12).
-7. **synthesize** (`strong` LLM): write the answer using only the ranked results. Every factual sentence carries one or more `[n]` citations. If sources disagree, say so and cite both sides. If evidence is insufficient, say that rather than filling gaps from model knowledge.
-8. **verify** (`strong` LLM, separate call): check each cited sentence against its cited snippets; remove or flag unsupported claims; drop citations that point to non-existent indices.
+1. **plan** (`fast` LLM): classify the question (news / academic / both), extract entities and time window, flag biomedical questions, produce 1–3 query rewrites per source family. Output: `QueryPlan`.
+2. **fan_out**: one LangGraph `Send` per adapter whose `accepts(plan)` is true (family has queries; PubMed also needs `plan.biomedical`). Each runs in the `source` node; with none, the graph goes straight to normalize.
+3. **source**: runs one adapter via `run_adapter`, which never raises (per-adapter timeout, default 8s). One slow or failing source must never fail the request.
+4. **normalize**: clean HTML to text, truncate snippets, canonicalize URLs (`clean_url`), DOIs and arXiv ids (`footnote/identifiers.py`).
+5. **dedupe**: union-find over DOI, arXiv ID, PMID and canonical URL, then near-duplicate titles (same family, ≥25 chars, `difflib` ratio ≥ 0.92; two published works with different DOIs never merge). Syndicated news (same wire story on several outlets) collapses to one result that keeps all outlet URLs; a preprint merges into its published version.
+6. **enrich**: Crossref DOI lookups fill missing date, citations, venue, authors (ranking gaps first; max 20 lookups, 5 concurrent). Never fails the request.
+7. **rank**: score = relevance × trust weight (from config) × quality. Relevance is one batched `fast`-LLM call scoring 0–10 (`prompts/rank.md`); below 3/10 is dropped; if the call fails, word overlap stands in and nothing is dropped. Quality is recency for news (30-day half-life, ignored inside a requested time window) and citation count for academic (new papers not penalized; preprints ×0.85). Keep top N (default 12).
+8. **synthesize** (`strong` LLM): write the answer using only the ranked results. Every factual sentence carries one or more `[n]` citations. If sources disagree, say so and cite both sides. If evidence is insufficient, say that rather than filling gaps from model knowledge.
+9. **verify** (`strong` LLM, separate call): check each cited sentence against its cited snippets; remove or flag unsupported claims; drop citations that point to non-existent indices.
 
 ### Graph state
 
-Defined in `footnote/graph/state.py` as a `TypedDict` with reducers for list fields that adapters append to in parallel (`results: Annotated[list[SourceResult], operator.add]`). Also tracks `errors` per adapter and `timings` for observability.
+Defined in `footnote/graph/state.py` as a `TypedDict` with reducers for list fields that adapters append to in parallel (`results: Annotated[list[SourceResult], operator.add]`). `candidates` holds the normalized/deduped/enriched list and `ranked` the final numbered sources. Also tracks `errors` per adapter and `timings` for observability. The `source` node takes a `SourceTask` (`adapter_id`, `plan`) instead of the graph state.
 
 ## Sources
 
-All sources are declared in `config/sources.yaml`; adapters are registered by `id`. Adding a source = adding an adapter class plus a YAML entry.
+All sources are declared in `config/sources.yaml`; adapters are registered by `id`. Adding a source = a `NativeAdapter` subclass decorated with `@register("<id>")` (set `requires_key` if it needs one; override `accepts` if it only fits some plans), an import in `footnote/sources/__init__.py`, a YAML entry, and respx tests against a fixture. Record fixtures from the real API where possible. Adapters whose key is missing are skipped at startup and reported `false` in `/health`. Every adapter is wrapped in `CachedAdapter` (successful searches only; keys are hashed).
 
 ### Academic (native APIs)
 | id | Notes |
 |---|---|
 | `openalex` | Broad coverage, free, no key; send `mailto` for the polite pool. |
-| `semantic_scholar` | Citation counts, abstracts; API key optional, respect rate limits. |
-| `pubmed` | NCBI E-utilities (`esearch` + `efetch`); API key raises the rate limit. Biomedical questions only. |
-| `arxiv` | Preprints; mark results as **preprint** in UI and in synthesis. |
-| `crossref` | DOI metadata fallback and enrichment. |
+| `semantic_scholar` | Citation counts, abstracts; API key optional. Keyless shared pool is often 429 → only one query per search without a key. |
+| `pubmed` | NCBI E-utilities (`esearch` + `efetch` XML); API key raises the rate limit. Only runs when `plan.biomedical`; all rewrites OR'd into one esearch. |
+| `arxiv` | Atom API, one request per search (all rewrites OR'd, terms AND'd). Always `is_preprint`; mark as **preprint** in UI and in synthesis. |
+| `crossref` | `kind: enrichment`: DOI metadata fallback in the enrich step, not searched. |
 
 ### News (native APIs)
 | id | Notes |
 |---|---|
-| `guardian` | Guardian Open Platform, key required. |
-| `nyt` | NYT Article Search, key required; snippets/abstracts only. |
-| `gdelt` | Broad event/news discovery; use for finding coverage, then filter to whitelisted domains. |
+| `guardian` | Guardian Open Platform, key required (the public `test` key no longer works). |
+| `nyt` | NYT Article Search, key required; snippets/abstracts only; 5 req/min → best query only. |
+| `gdelt` | Discovery only: titles, no snippets. 1 request per 5s; errors come back as plain text. Query restricted with `domain:` filters, then re-checked against the news whitelist; trust = min(gdelt, outlet). |
 
 ### Search API (domain-restricted)
 - Provider behind a `WebSearchProvider` interface (Tavily, Exa or Brave; chosen via `SEARCH_PROVIDER`).
@@ -89,7 +91,7 @@ All sources are declared in `config/sources.yaml`; adapters are registered by `i
 sources:
   - id: openalex
     family: academic
-    kind: native        # native | search
+    kind: native        # native | search | enrichment
     trust: 0.9          # 0–1, used in ranking
     enabled: true
     rate_limit_per_sec: 10
@@ -103,7 +105,7 @@ sources:
 
 ## Data models (`footnote/models.py`)
 
-- `QueryPlan`: `intent` (news | academic | both), `queries: dict[family, list[str]]`, `time_window: tuple[date, date] | None`, `entities: list[str]`.
+- `QueryPlan`: `intent` (news | academic | both), `queries: dict[family, list[str]]`, `time_window: tuple[date, date] | None`, `entities: list[str]`, `biomedical: bool`. (The LLM fills a flat `PlanOutput`, since nested dicts/tuples trip up some providers, and `build_plan` converts it.)
 - `SourceResult`: `id` (stable hash), `source_id`, `family`, `title`, `url`, `alt_urls`, `snippet`, `published_at`, `authors`, `venue`, `doi`, `arxiv_id`, `pmid`, `citation_count`, `is_preprint`, `trust`, `score`.
 - `Citation`: `index`, `result_id`.
 - `Answer`: `text` (markdown with `[n]` markers), `citations: list[Citation]`, `sources: list[SourceResult]`, `unsupported_claims_removed: int`, `source_errors: dict[str, str]`, `timings_ms: dict[str, int]`.
@@ -141,18 +143,23 @@ footnote/
   llm.py               # provider-agnostic model factory (fast/strong)
   models.py
   whitelist.py         # URL/domain whitelist checks (security-critical; keep tested)
+  identifiers.py       # DOI / arXiv id / URL normalization (clean_url for display, url_key for dedupe)
+  text.py              # html_to_text, truncate, content_words
   citations.py         # deterministic [n] marker cleanup, shared by synthesize/verify
-  cache.py
+  cache.py             # Cache protocol + TTLCache (values must be JSON-serializable)
   graph/
-    state.py
+    state.py           # GraphState, SourceTask, Node/SourceNode protocols, @timed
     build.py           # graph construction
-    nodes/             # plan, fan_out, normalize, dedupe, rank, synthesize, verify
+    nodes/             # plan, fan_out (+ source), normalize, dedupe, enrich, rank, synthesize, verify
   sources/
-    base.py            # SourceAdapter protocol, registry
-    academic/          # openalex.py, semantic_scholar.py, pubmed.py, arxiv.py, crossref.py
+    __init__.py        # build_adapters, build_enricher, source_status (imports register adapters)
+    base.py            # SourceAdapter protocol, NativeAdapter base, registry, run_adapter, AdapterError
+    cached.py          # CachedAdapter
+    parsing.py         # parse_iso_date, first_text
+    academic/          # openalex.py, semantic_scholar.py, pubmed.py, arxiv.py, crossref.py (enricher)
     news/              # guardian.py, nyt.py, gdelt.py
     search/            # provider interface + tavily.py / exa.py / brave.py
-  prompts/             # plan.md, synthesize.md, verify.md + load_prompt() (string.Template, $vars)
+  prompts/             # plan.md, rank.md, synthesize.md, verify.md + load_prompt(), source_blocks()
   web/templates/, web/static/
 config/sources.yaml
 tests/
@@ -182,7 +189,9 @@ uv run python -m tests.evals.run         # eval suite (hits real APIs; needs key
 - Prompts live in `footnote/prompts/` as files; nodes load them by name.
 - LLM outputs that drive logic (plans, scores, verification) use structured output into pydantic models, not free-text parsing.
 - Unit tests never hit the network or a real LLM; use `respx` fixtures and `tests/fakes.py` (`FakeChatModel`, `StaticAdapter`). Tests build `Settings(_env_file=None, ...)` so a local `.env` never leaks in.
-- Adapter error strings shown to users never include URLs or exception text (query strings can carry API keys); use `describe_error` in `sources/base.py`.
+- Adapter error strings shown to users never include URLs or exception text (query strings can carry API keys); use `describe_error` in `sources/base.py`, or raise `AdapterError` with a safe message.
+- Any retrieved text that goes into a prompt goes through `source_blocks()` (escaped, delimited); never interpolate snippets directly.
+- Graph tests use `FakeChatModel(structured=[...])`, which returns the first queued item matching the requested schema (`PlanOutput`, `RelevanceScores`, …), so call order doesn't matter.
 - Keep functions small and typed; `mypy --strict` must pass.
 
 ## Evaluation
@@ -200,5 +209,6 @@ uv run python -m tests.evals.run         # eval suite (hits real APIs; needs key
 ## Open decisions
 
 - **LLM provider and models** for `fast` and `strong` roles (not yet chosen; code must stay provider-agnostic until then).
-- Which search API provider to use first (Tavily vs Exa vs Brave).
-- Whether ranking uses an embedding model or LLM scoring for relevance in v1.
+- ~~Which search API provider to use first~~: Tavily (Exa/Brave can follow behind `WebSearchProvider`).
+- ~~Embedding vs LLM relevance~~: LLM scoring with the `fast` model in v1 (keeps the code provider-agnostic).
+- Tuning to revisit with the eval suite: arXiv AND-ing up to 6 terms per rewrite may be too strict; the rank thresholds (`MIN_RELEVANCE`, half-life, citation curve) are first guesses.

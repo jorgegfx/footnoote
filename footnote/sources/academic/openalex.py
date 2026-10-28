@@ -3,11 +3,10 @@
 from datetime import date
 from typing import Any
 
-import httpx
-
-from footnote.config import Settings, SourceConfig
+from footnote.identifiers import is_preprint_doi, normalize_doi
 from footnote.models import Family, QueryPlan, SourceResult
-from footnote.sources.base import register
+from footnote.sources.base import NativeAdapter, register
+from footnote.sources.parsing import parse_iso_date
 
 API_URL = "https://api.openalex.org/works"
 PER_QUERY = 8
@@ -28,14 +27,8 @@ SELECT = ",".join(
 
 
 @register("openalex")
-class OpenAlexAdapter:
+class OpenAlexAdapter(NativeAdapter):
     family = Family.ACADEMIC
-
-    def __init__(self, config: SourceConfig, settings: Settings, client: httpx.AsyncClient):
-        self.id = config.id
-        self.trust = config.trust
-        self.settings = settings
-        self.client = client
 
     async def search(self, plan: QueryPlan) -> list[SourceResult]:
         results: dict[str, SourceResult] = {}
@@ -71,23 +64,24 @@ class OpenAlexAdapter:
             return None
         source = location.get("source") or {}
         pmid_url: str | None = (work.get("ids") or {}).get("pmid")
+        doi = normalize_doi(doi_url)
         return SourceResult(
             source_id=self.id,
             family=Family.ACADEMIC,
             title=title,
             url=url,
             snippet=abstract_from_inverted_index(work.get("abstract_inverted_index")),
-            published_at=_parse_date(work.get("publication_date")),
+            published_at=parse_iso_date(work.get("publication_date")),
             authors=[
                 a["author"]["display_name"]
                 for a in work.get("authorships") or []
                 if (a.get("author") or {}).get("display_name")
             ],
             venue=source.get("display_name"),
-            doi=doi_url.removeprefix("https://doi.org/") if doi_url else None,
+            doi=doi,
             pmid=pmid_url.rstrip("/").rsplit("/", 1)[-1] if pmid_url else None,
             citation_count=work.get("cited_by_count"),
-            is_preprint=work.get("type") == "preprint",
+            is_preprint=work.get("type") == "preprint" or is_preprint_doi(doi),
             trust=self.trust,
         )
 
@@ -98,10 +92,3 @@ def abstract_from_inverted_index(index: dict[str, list[int]] | None) -> str:
         return ""
     positioned = [(pos, word) for word, positions in index.items() for pos in positions]
     return " ".join(word for _, word in sorted(positioned))
-
-
-def _parse_date(value: str | None) -> date | None:
-    try:
-        return date.fromisoformat(value) if value else None
-    except ValueError:
-        return None
