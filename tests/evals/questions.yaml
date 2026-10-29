@@ -1,0 +1,114 @@
+# Golden questions for the eval suite (`uv run python -m tests.evals.run`).
+#
+#   category: recent_news | established_science | contested | no_good_answer
+#   insufficient: true when a correct answer says the trusted sources don't settle it
+#   families: optional override, as in POST /api/search
+#
+# Recent-news questions are phrased so they stay answerable as the news moves on; judge them
+# on citations and sourcing, not on a fixed fact.
+
+questions:
+  # --- Recent news ---
+  - id: news-central-bank-rates
+    category: recent_news
+    question: What have major central banks recently decided about interest rates?
+  - id: news-ai-regulation
+    category: recent_news
+    question: What is the latest on AI regulation in the European Union?
+  - id: news-climate-talks
+    category: recent_news
+    question: What came out of the most recent UN climate summit?
+  - id: news-heatwaves
+    category: recent_news
+    question: How have recent heatwaves affected Europe?
+  - id: news-chip-export-controls
+    category: recent_news
+    question: What are the latest US export controls on advanced semiconductors?
+  - id: news-bird-flu
+    category: recent_news
+    question: What is the current situation with H5N1 bird flu in dairy cattle?
+  - id: news-space-launches
+    category: recent_news
+    question: What recent progress has been made on crewed missions to the Moon?
+  - id: news-oil-prices
+    category: recent_news
+    question: Why have oil prices moved in recent months?
+
+  # --- Established science ---
+  - id: sci-smoking-cancer
+    category: established_science
+    question: Does smoking cause lung cancer?
+  - id: sci-mrna-vaccines
+    category: established_science
+    question: How do mRNA vaccines work?
+  - id: sci-crispr
+    category: established_science
+    question: What is CRISPR-Cas9 and how is it used for gene editing?
+  - id: sci-greenhouse-effect
+    category: established_science
+    question: How does carbon dioxide contribute to the greenhouse effect?
+  - id: sci-antibiotic-resistance
+    category: established_science
+    question: What drives antibiotic resistance in bacteria?
+  - id: sci-exercise-depression
+    category: established_science
+    question: Does regular exercise reduce symptoms of depression?
+  - id: sci-gravitational-waves
+    category: established_science
+    question: How were gravitational waves first detected?
+  - id: sci-sleep-memory
+    category: established_science
+    question: What role does sleep play in memory consolidation?
+
+  # --- Contested topics (a good answer reports the disagreement and cites both sides) ---
+  - id: contested-coffee-health
+    category: contested
+    question: Is drinking coffee good or bad for heart health?
+  - id: contested-intermittent-fasting
+    category: contested
+    question: Does intermittent fasting improve longevity in humans?
+  - id: contested-red-meat
+    category: contested
+    question: Does eating red meat increase the risk of colorectal cancer?
+  - id: contested-social-media-teens
+    category: contested
+    question: Does social media use harm teenagers' mental health?
+  - id: contested-minimum-wage
+    category: contested
+    question: Do minimum wage increases reduce employment?
+  - id: contested-alcohol-moderate
+    category: contested
+    question: Is moderate alcohol consumption beneficial for health?
+  - id: contested-remote-work
+    category: contested
+    question: Does remote work reduce productivity?
+
+  # --- No good trusted answer (should say evidence is insufficient) ---
+  - id: none-personal-advice
+    category: no_good_answer
+    insufficient: true
+    question: Which stock should I buy tomorrow to double my money?
+  - id: none-fictional
+    category: no_good_answer
+    insufficient: true
+    question: What is the population of the city of Zarnovia on Kepler-442b?
+  - id: none-private-person
+    category: no_good_answer
+    insufficient: true
+    question: What did my neighbour have for breakfast this morning?
+  - id: none-future-event
+    category: no_good_answer
+    insufficient: true
+    question: Who will win the 2040 FIFA World Cup?
+  - id: none-made-up-study
+    category: no_good_answer
+    insufficient: true
+    question: What did the 2019 Harvard study on telepathic plants conclude?
+  - id: none-homeopathy-cure
+    category: no_good_answer
+    insufficient: true
+    question: Which homeopathic remedy cures type 1 diabetes?
+  - id: none-niche-local
+    category: no_good_answer
+    insufficient: true
+    question: What time does the bakery on Elm Street in Springfield open on Sundays?

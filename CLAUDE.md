@@ -138,7 +138,7 @@ One page: search box, family toggles (News / Academic), live list of sources as 
 
 ```
 footnote/
-  main.py              # FastAPI app, routes, SSE
+  main.py              # FastAPI app, routes, SSE; open_runtime (shared with the eval suite)
   config.py            # pydantic-settings; loads env + sources.yaml
   llm.py               # provider-agnostic model factory (fast/strong)
   models.py
@@ -147,6 +147,8 @@ footnote/
   text.py              # html_to_text, truncate, content_words
   citations.py         # deterministic [n] marker cleanup, shared by synthesize/verify
   cache.py             # Cache protocol + TTLCache (values must be JSON-serializable)
+  http.py              # RetryTransport (backoff, Retry-After), per-source RateLimiter, ThrottledClient
+  observability.py     # structured logs (text/json), request ids, API-key redaction
   graph/
     state.py           # GraphState, SourceTask, Node/SourceNode protocols, @timed
     build.py           # graph construction
@@ -165,12 +167,12 @@ config/sources.yaml
 tests/
   unit/                # adapters with respx fixtures, dedupe, ranking
   graph/               # node tests with fake LLM
-  evals/               # golden questions + scoring script
+  evals/               # questions.yaml, scoring.py (pure, unit tested), run.py; results/
 ```
 
 ## Environment variables
 
-`LLM_PROVIDER`, `LLM_MODEL_FAST`, `LLM_MODEL_STRONG`, provider API key(s), `SEARCH_PROVIDER`, `SEARCH_API_KEY`, `OPENALEX_API_KEY` (optional), `GUARDIAN_API_KEY`, `NYT_API_KEY`, `NCBI_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY`, `CONTACT_EMAIL`, `CACHE_TTL_SECONDS` (default 900), `ADAPTER_TIMEOUT_SECONDS` (default 8). Provide `.env.example`; never commit `.env`.
+`LLM_PROVIDER`, `LLM_MODEL_FAST`, `LLM_MODEL_STRONG`, provider API key(s), `SEARCH_PROVIDER`, `SEARCH_API_KEY`, `OPENALEX_API_KEY` (optional), `GUARDIAN_API_KEY`, `NYT_API_KEY`, `NCBI_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY`, `CONTACT_EMAIL`, `CACHE_TTL_SECONDS` (default 900), `ADAPTER_TIMEOUT_SECONDS` (default 8), `HTTP_MAX_RETRIES` (default 2), `SEARCH_RATE_LIMIT_PER_MINUTE` (default 30; 0 disables), `LOG_LEVEL` (default INFO), `LOG_FORMAT` (text | json). Provide `.env.example`; never commit `.env`.
 
 ## Commands
 
