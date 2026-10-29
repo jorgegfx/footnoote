@@ -6,6 +6,7 @@ from footnote.graph.build import GraphDeps, build_graph
 from footnote.graph.nodes.plan import PlanOutput
 from footnote.graph.nodes.rank import RelevanceScore, RelevanceScores
 from footnote.graph.nodes.synthesize import NO_RESULTS
+from footnote.graph.nodes.verify import ClaimVerdict, Verification
 from footnote.graph.state import GraphState
 from footnote.models import Answer, Family
 from tests.fakes import FakeChatModel, StaticAdapter, fake_models, make_result
@@ -24,9 +25,12 @@ async def run(
     plan: PlanOutput = ACADEMIC_PLAN,
     reply: str = "",
     relevance: RelevanceScores | None = None,
+    verification: Verification | None = None,
 ) -> tuple[dict[str, Any], FakeChatModel, FakeChatModel]:
     fast = FakeChatModel(structured=[plan] + ([relevance] if relevance else []))
-    strong = FakeChatModel(texts=[reply] if reply else [])
+    strong = FakeChatModel(
+        texts=[reply] if reply else [], structured=[verification] if verification else []
+    )
     deps = GraphDeps(
         fake_models(fast, strong), adapters, adapter_timeout=0.2, today=lambda: date(2026, 10, 28)
     )
@@ -39,11 +43,17 @@ async def test_end_to_end_cited_answer() -> None:
     news = StaticAdapter("news_search", Family.NEWS, [make_result(3, Family.NEWS)])
 
     state, _, strong = await run(
-        [academic, news], reply="Coffee raises it briefly [1][7].", relevance=scores(9, 5)
+        [academic, news],
+        reply="Coffee raises it briefly [1][7]. It is harmless [2].",
+        relevance=scores(9, 5),
+        verification=Verification(
+            verdicts=[ClaimVerdict(claim=1, supported_by=[1]), ClaimVerdict(claim=2)]
+        ),
     )
 
     answer: Answer = state["answer"]
-    assert answer.text == "Coffee raises it briefly [1]."  # [7] doesn't exist
+    assert answer.text == "Coffee raises it briefly [1]."  # [7] doesn't exist; [2] unsupported
+    assert answer.unsupported_claims_removed == 1
     assert [c.index for c in answer.citations] == [1]
     assert answer.citations[0].result_id == answer.sources[0].id
     assert [s.title for s in answer.sources] == ["Result 1", "Result 2"]
@@ -56,6 +66,7 @@ async def test_end_to_end_cited_answer() -> None:
         "enrich",
         "rank",
         "synthesize",
+        "verify",
     }
     prompt = strong.calls[0][1].content
     assert '<source index="1"' in prompt
