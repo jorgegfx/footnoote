@@ -1,8 +1,12 @@
-"""synthesize: write a cited answer from the ranked results only (`strong` model)."""
+"""synthesize: write a cited answer from the ranked results only (`strong` model).
+
+Tokens are streamed to `custom` stream consumers as `token` events while the answer is drafted.
+"""
 
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.config import get_stream_writer
 
 from footnote.citations import clean_citations
 from footnote.graph.state import GraphState, Node, timed
@@ -24,10 +28,15 @@ def make_synthesize_node(models: ModelFactory) -> Node:
             return {"answer": Answer(text=NO_RESULTS)}
 
         system = load_prompt("synthesize").substitute()
-        message = await models("strong").ainvoke(
+        write = get_stream_writer()
+        parts: list[str] = []
+        async for chunk in models("strong").astream(
             [SystemMessage(system), HumanMessage(source_blocks(state["question"], sources))]
-        )
-        text, used = clean_citations(message.text.strip(), len(sources))
+        ):
+            if chunk.text:
+                parts.append(chunk.text)
+                write({"event": "token", "data": {"text": chunk.text}})
+        text, used = clean_citations("".join(parts).strip(), len(sources))
         return {
             "answer": Answer(
                 text=text,

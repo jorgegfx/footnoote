@@ -1,8 +1,13 @@
-"""fan_out: one `Send` per adapter that accepts the plan; each runs in the `source` node."""
+"""fan_out: one `Send` per adapter that accepts the plan; each runs in the `source` node.
+
+The source node reports `source_started` / `source_done` / `source_error` to `custom` stream
+consumers so the UI can show sources as they report back.
+"""
 
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from langgraph.config import get_stream_writer
 from langgraph.types import Send
 
 from footnote.graph.state import GraphState, SourceNode, SourceTask
@@ -29,7 +34,14 @@ def make_source_node(adapters: Sequence[SourceAdapter], timeout: float) -> Sourc
     by_id = {a.id: a for a in adapters}
 
     async def source(state: SourceTask) -> dict[str, Any]:
+        write = get_stream_writer()
+        write({"event": "source_started", "data": {"source": state["adapter_id"]}})
         outcome = await run_adapter(by_id[state["adapter_id"]], state["plan"], timeout)
+        report: dict[str, Any] = {"source": outcome.source_id, "elapsed_ms": outcome.elapsed_ms}
+        if outcome.ok:
+            write({"event": "source_done", "data": report | {"count": len(outcome.results)}})
+        else:
+            write({"event": "source_error", "data": report | {"error": outcome.error or "failed"}})
         update: dict[str, Any] = {
             "results": outcome.results,
             "timings": {f"source:{outcome.source_id}": outcome.elapsed_ms},

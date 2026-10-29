@@ -1,6 +1,8 @@
+import json
 from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 import respx
@@ -9,6 +11,7 @@ from fastapi.testclient import TestClient
 from footnote.config import Settings
 from footnote.graph.nodes.plan import PlanOutput
 from footnote.graph.nodes.rank import RelevanceScore, RelevanceScores
+from footnote.graph.nodes.verify import ClaimVerdict, Verification
 from footnote.main import create_app
 from footnote.models import Family
 from footnote.sources.academic.openalex import API_URL as OPENALEX_URL
@@ -43,6 +46,14 @@ class FakeSearchProvider:
 
 def all_relevant(count: int) -> RelevanceScores:
     return RelevanceScores(scores=[RelevanceScore(index=i, score=8) for i in range(1, count + 1)])
+
+
+def sse_events(body: str) -> list[tuple[str, Any]]:
+    events = []
+    for block in body.strip().split("\n\n"):
+        lines = dict(line.split(": ", 1) for line in block.splitlines())
+        events.append((lines["event"], json.loads(lines["data"])))
+    return events
 
 
 @pytest.fixture
@@ -171,3 +182,56 @@ def test_health_reports_missing_keys(settings: Settings) -> None:
     assert status["arxiv"]
     assert status["guardian"] is False
     assert status["nyt"] is False
+
+
+def test_stream_reports_progress_then_verified_answer(
+    client: TestClient, fast: FakeChatModel, strong: FakeChatModel
+) -> None:
+    fast.structured = [PlanOutput(intent="academic", academic_queries=["numpy"]), all_relevant(2)]
+    strong.texts = ["NumPy is widely used [1]. It is slow [2]."]
+    strong.structured = [
+        Verification(verdicts=[ClaimVerdict(claim=1, supported_by=[1]), ClaimVerdict(claim=2)])
+    ]
+
+    response = client.get("/api/search/stream", params={"q": "How popular is NumPy?"})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = sse_events(response.text)
+    names = [name for name, _ in events]
+    assert names[0] == "plan"
+    assert names[-2:] == ["answer", "done"]
+    assert names.index("source_started") < names.index("source_done") < names.index("ranked")
+    assert names.index("ranked") < names.index("token") < names.index("answer")
+    done = {data["source"]: data for name, data in events if name == "source_done"}
+    assert done.keys() == {"openalex", "academic_search"}
+    assert done["openalex"]["count"] == 2
+    draft = "".join(data["text"] for name, data in events if name == "token")
+    assert draft == "NumPy is widely used [1]. It is slow [2]."
+    answer = events[-2][1]
+    assert answer["text"] == "NumPy is widely used [1]."
+    assert answer["unsupported_claims_removed"] == 1
+    assert "verify" in answer["timings_ms"]
+
+
+def test_stream_reports_empty_plan_as_error_event(client: TestClient, fast: FakeChatModel) -> None:
+    fast.structured = [PlanOutput(intent="news")]
+    events = sse_events(client.get("/api/search/stream", params={"q": "asdf qwer"}).text)
+    assert [name for name, _ in events] == ["error", "done"]
+    assert events[0][1]["status"] == 422
+
+
+@pytest.mark.parametrize(
+    "params",
+    [{"q": "hi"}, {"q": "valid question", "families": "blogs"}, {"q": "valid", "max_results": 0}],
+)
+def test_stream_validation(client: TestClient, params: dict[str, object]) -> None:
+    assert client.get("/api/search/stream", params=params).status_code == 422
+
+
+def test_index_page(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'id="search"' in response.text
+    assert "/static/app.js" in response.text
+    assert client.get("/static/style.css").status_code == 200
