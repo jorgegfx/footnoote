@@ -5,7 +5,7 @@
 #   kind:   native (dedicated API adapter) | search (web search restricted to `domains`)
 #           | enrichment (metadata lookups, not searched)
 #   trust:  0–1, multiplied into the ranking score
-#   rate_limit_per_sec: the provider's published limit (enforced from milestone 5)
+#   rate_limit_per_sec: the provider's published limit, enforced per process
 
 sources:
   # --- Academic: native APIs ---

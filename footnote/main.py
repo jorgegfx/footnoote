@@ -2,8 +2,11 @@
 
 import json
 import logging
+import os
 import time
-from collections.abc import AsyncIterator
+import uuid
+from collections import deque
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import date
@@ -13,7 +16,7 @@ from typing import Annotated, Any, Self, cast
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,8 +28,10 @@ from footnote.config import Settings, SourcesConfig, get_settings, load_sources
 from footnote.graph.build import GraphDeps, SearchGraph, build_graph
 from footnote.graph.nodes.plan import EmptyPlanError
 from footnote.graph.state import GraphState
+from footnote.http import RetryTransport
 from footnote.llm import LLMNotConfiguredError, ModelFactory, model_factory
 from footnote.models import Answer, Family
+from footnote.observability import configure_logging, request_id
 from footnote.sources import build_adapters, build_enricher, source_status
 from footnote.sources.base import SourceAdapter
 from footnote.sources.search.base import WebSearchProvider
@@ -65,17 +70,47 @@ class SourceInfo(BaseModel):
     domains: list[str]
 
 
+class ClientRateLimiter:
+    """Sliding one-minute window per client key, in process."""
+
+    def __init__(self, per_minute: int):
+        self.per_minute = per_minute
+        self.hits: dict[str, deque[float]] = {}
+
+    def retry_after(self, key: str) -> int | None:
+        """Records a hit and returns None, or the seconds to wait if the client is over."""
+        if self.per_minute <= 0:
+            return None
+        now = time.monotonic()
+        if len(self.hits) > 10_000:  # forget idle clients
+            self.hits = {k: q for k, q in self.hits.items() if q and now - q[-1] < 60}
+        window = self.hits.setdefault(key, deque())
+        while window and now - window[0] >= 60:
+            window.popleft()
+        if len(window) >= self.per_minute:
+            return max(1, int(60 - (now - window[0])) + 1)
+        window.append(now)
+        return None
+
+
 @dataclass
 class Runtime:
     settings: Settings
     sources: SourcesConfig
     adapters: list[SourceAdapter]
     graph: SearchGraph
+    limiter: ClientRateLimiter
 
 
 def user_agent(settings: Settings) -> str:
     contact = f" (+mailto:{settings.contact_email})" if settings.contact_email else ""
     return f"Footnote/{__version__}{contact}"
+
+
+def env_secrets() -> list[str]:
+    """Provider keys read straight from the environment (e.g. ANTHROPIC_API_KEY)."""
+    markers = ("_KEY", "_TOKEN", "_SECRET")
+    return [v for k, v in os.environ.items() if k.upper().endswith(markers) and v]
 
 
 def initial_state(body: SearchRequest) -> GraphState:
@@ -92,6 +127,16 @@ def finish(final: dict[str, Any], start: float) -> Answer:
     timings = {**final.get("timings", {}), "total": int((time.perf_counter() - start) * 1000)}
     answer = answer.model_copy(
         update={"source_errors": final.get("errors", {}), "timings_ms": timings}
+    )
+    logger.info(
+        "search completed",
+        extra={
+            "timings_ms": timings,
+            "source_errors": answer.source_errors,
+            "sources": len(answer.sources),
+            "citations": len(answer.citations),
+            "unsupported_claims_removed": answer.unsupported_claims_removed,
+        },
     )
     return answer
 
@@ -118,6 +163,17 @@ def stream_request(
 
 def runtime_of(request: Request) -> Runtime:
     return cast(Runtime, request.app.state.runtime)
+
+
+def rate_limit(request: Request) -> None:
+    client = request.client.host if request.client else "unknown"
+    wait = runtime_of(request).limiter.retry_after(client)
+    if wait is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many searches; please wait a moment.",
+            headers={"Retry-After": str(wait)},
+        )
 
 
 async def stream_answer(graph: SearchGraph, initial: GraphState) -> AsyncIterator[str]:
@@ -162,6 +218,7 @@ async def open_runtime(
         headers={"User-Agent": user_agent(settings)},
         timeout=httpx.Timeout(settings.adapter_timeout_seconds),
         follow_redirects=True,
+        transport=RetryTransport(max_retries=settings.http_max_retries),
     ) as client:
         cache = TTLCache()
         adapters = build_adapters(settings, sources, client, search_provider, cache)
@@ -173,7 +230,8 @@ async def open_runtime(
                 enricher=build_enricher(settings, sources, client, cache),
             )
         )
-        yield Runtime(settings, sources, adapters, graph)
+        limiter = ClientRateLimiter(settings.search_rate_limit_per_minute)
+        yield Runtime(settings, sources, adapters, graph, limiter)
 
 
 def create_app(
@@ -188,15 +246,44 @@ def create_app(
         if settings is None:
             load_dotenv()  # provider SDKs read their API keys from os.environ
         resolved = settings or get_settings()
+        if settings is None:
+            configure_logging(
+                resolved.log_level, resolved.log_format, resolved.secret_values() + env_secrets()
+            )
         async with open_runtime(resolved, models, search_provider) as runtime:
             app.state.runtime = runtime
+            logger.info(
+                "footnote started", extra={"sources": sorted(a.id for a in runtime.adapters)}
+            )
             yield
 
     app = FastAPI(title="Footnote", version=__version__, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=WEB_DIR / "templates")
 
-    @app.post("/api/search")
+    @app.middleware("http")
+    async def log_requests(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        token = request_id.set(request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12])
+        start = time.perf_counter()
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id.get() or ""
+            logger.info(
+                "request",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,  # no query string: it holds the question
+                    "status": response.status_code,
+                    "duration_ms": int((time.perf_counter() - start) * 1000),
+                },
+            )
+            return response
+        finally:
+            request_id.reset(token)
+
+    @app.post("/api/search", dependencies=[Depends(rate_limit)])
     async def search(body: SearchRequest, request: Request) -> Answer:
         start = time.perf_counter()
         try:
@@ -207,7 +294,7 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return finish(cast(dict[str, Any], final), start)
 
-    @app.get("/api/search/stream")
+    @app.get("/api/search/stream", dependencies=[Depends(rate_limit)])
     async def search_stream(
         body: Annotated[SearchRequest, Depends(stream_request)], request: Request
     ) -> StreamingResponse:

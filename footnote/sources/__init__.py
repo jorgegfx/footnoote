@@ -82,6 +82,9 @@ def build_enricher(
     client: httpx.AsyncClient,
     cache: Cache | None = None,
 ) -> CrossrefEnricher | None:
-    if sources.get("crossref") is None:
+    config = sources.get("crossref")
+    if config is None:
         return None
-    return CrossrefEnricher(settings, client, cache, settings.cache_ttl_seconds)
+    return CrossrefEnricher(
+        settings, client, cache, settings.cache_ttl_seconds, config.rate_limit_per_sec
+    )

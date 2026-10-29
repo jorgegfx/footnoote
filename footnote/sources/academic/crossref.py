@@ -15,6 +15,7 @@ import httpx
 
 from footnote.cache import Cache
 from footnote.config import Settings
+from footnote.http import RateLimiter, ThrottledClient
 from footnote.models import Family, SourceResult
 from footnote.text import html_to_text
 
@@ -32,9 +33,13 @@ class CrossrefEnricher:
         client: httpx.AsyncClient,
         cache: Cache | None = None,
         ttl_seconds: float = 0,
+        rate_limit_per_sec: float | None = None,
     ):
         self.settings = settings
-        self.client = client
+        limiter = None
+        if rate_limit_per_sec:
+            limiter = RateLimiter(rate_limit_per_sec, settings.adapter_timeout_seconds)
+        self.client = ThrottledClient(client, limiter)
         self.cache = cache
         self.ttl_seconds = ttl_seconds
         self._slots = asyncio.Semaphore(CONCURRENCY)

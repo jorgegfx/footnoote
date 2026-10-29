@@ -10,6 +10,7 @@ from typing import ClassVar, Protocol
 import httpx
 
 from footnote.config import Settings, SourceConfig, SourcesConfig
+from footnote.http import LimiterBusyError, RateLimiter, ThrottledClient
 from footnote.models import AdapterResult, Family, QueryPlan, SourceResult
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,10 @@ class NativeAdapter(ABC):
         self.id = config.id
         self.trust = config.trust
         self.settings = settings
-        self.client = client
+        limiter = None
+        if config.rate_limit_per_sec:
+            limiter = RateLimiter(config.rate_limit_per_sec, settings.adapter_timeout_seconds)
+        self.client = ThrottledClient(client, limiter)
         self.sources = sources
 
     @classmethod
@@ -82,6 +86,8 @@ def describe_error(exc: BaseException) -> str:
     match exc:
         case AdapterError():
             return str(exc)
+        case LimiterBusyError():
+            return "busy; try again shortly"
         case httpx.HTTPStatusError() if exc.response.status_code == 429:
             return "rate limited"
         case httpx.HTTPStatusError():

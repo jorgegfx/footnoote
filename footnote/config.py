@@ -35,6 +35,16 @@ class Settings(BaseSettings):
     adapter_timeout_seconds: float = 8.0
     sources_path: Path = PROJECT_ROOT / "config" / "sources.yaml"
 
+    log_level: str = "INFO"
+    log_format: Literal["text", "json"] = "text"
+    http_max_retries: int = Field(default=2, ge=0, le=5)
+    search_rate_limit_per_minute: int = Field(default=30, ge=0)  # per client IP; 0 disables
+
+    def secret_values(self) -> list[str]:
+        """Every configured credential, for log redaction."""
+        values = (getattr(self, name) for name in type(self).model_fields)
+        return [v.get_secret_value() for v in values if isinstance(v, SecretStr)]
+
 
 class SourceConfig(BaseModel):
     id: str

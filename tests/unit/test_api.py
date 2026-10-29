@@ -229,9 +229,21 @@ def test_stream_validation(client: TestClient, params: dict[str, object]) -> Non
     assert client.get("/api/search/stream", params=params).status_code == 422
 
 
-def test_index_page(client: TestClient) -> None:
-    response = client.get("/")
+def test_searches_are_rate_limited_per_client(api_settings: Settings, fast: FakeChatModel) -> None:
+    limited = api_settings.model_copy(update={"search_rate_limit_per_minute": 1})
+    fast.structured = [PlanOutput(intent="news"), PlanOutput(intent="news")]
+    app = create_app(limited, fake_models(fast, FakeChatModel()), FakeSearchProvider())
+    with TestClient(app) as test_client:
+        assert test_client.post("/api/search", json={"question": "asdf qwer"}).status_code == 422
+        response = test_client.get("/api/search/stream", params={"q": "asdf qwer"})
+    assert response.status_code == 429
+    assert int(response.headers["Retry-After"]) > 0
+
+
+def test_index_page_and_request_id(client: TestClient) -> None:
+    response = client.get("/", headers={"X-Request-ID": "abc123"})
     assert response.status_code == 200
     assert 'id="search"' in response.text
     assert "/static/app.js" in response.text
+    assert response.headers["X-Request-ID"] == "abc123"
     assert client.get("/static/style.css").status_code == 200
