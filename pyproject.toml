@@ -1,7 +1,7 @@
 [project]
 name = "footnote"
 version = "0.1.0"
-description = "AI search engine that answers from trusted news and academic sources with citations."
+description = "AI search engine that answers from trusted news sources with citations."
 authors = [
     { name = "Jorge Gonzalez", email = "jorgegfx@gmail.com" }
 ]
@@ -12,6 +12,8 @@ dependencies = [
     "jinja2>=3.1.6",
     "langchain>=1.4.7",
     "langchain-core>=1.7.1",
+    "langchain-ollama>=1.1.0",
+    "langchain-openai>=1.7.3",
     "langgraph>=1.2.18",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.2",

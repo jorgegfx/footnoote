@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 import respx
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from footnote.config import Settings
 from footnote.graph.nodes.plan import PlanOutput
@@ -14,7 +15,7 @@ from footnote.graph.nodes.rank import RelevanceScore, RelevanceScores
 from footnote.graph.nodes.verify import ClaimVerdict, Verification
 from footnote.main import create_app
 from footnote.models import Family
-from footnote.sources.academic.openalex import API_URL as OPENALEX_URL
+from footnote.sources.news.guardian import API_URL as GUARDIAN_URL
 from footnote.sources.search.base import WebHit
 from tests.conftest import FIXTURES, load_fixture
 from tests.fakes import FakeChatModel, fake_models
@@ -36,8 +37,6 @@ class FakeSearchProvider:
         max_results: int,
     ) -> list[WebHit]:
         self.calls.append((query, family))
-        if family != Family.NEWS:
-            return []
         return [
             WebHit(title="Reuters story", url="https://www.reuters.com/a", content="Story."),
             WebHit(title="Off-list", url="https://blog.example/b", content="Untrusted."),
@@ -58,7 +57,12 @@ def sse_events(body: str) -> list[tuple[str, Any]]:
 
 @pytest.fixture
 def api_settings(settings: Settings) -> Settings:
-    return settings.model_copy(update={"sources_path": Path(FIXTURES / "sources.yaml")})
+    return settings.model_copy(
+        update={
+            "sources_path": Path(FIXTURES / "sources.yaml"),
+            "guardian_api_key": SecretStr("test-guardian-key"),
+        }
+    )
 
 
 @pytest.fixture
@@ -77,7 +81,7 @@ def client(
 ) -> Iterator[TestClient]:
     app = create_app(api_settings, fake_models(fast, strong), FakeSearchProvider())
     with respx.mock(assert_all_called=False) as mock:
-        mock.get(OPENALEX_URL).respond(json=load_fixture("openalex_works.json"))
+        mock.get(GUARDIAN_URL).respond(json=load_fixture("guardian.json"))
         with TestClient(app) as test_client:
             yield test_client
 
@@ -85,42 +89,22 @@ def client(
 def test_search_returns_cited_answer(
     client: TestClient, fast: FakeChatModel, strong: FakeChatModel
 ) -> None:
-    fast.structured = [
-        PlanOutput(intent="both", news_queries=["numpy news"], academic_queries=["numpy"]),
-        all_relevant(3),
-    ]
-    strong.texts = ["NumPy is widely used [1][3]."]
+    fast.structured = [PlanOutput(news_queries=["bank of england rates"]), all_relevant(3)]
+    strong.texts = ["Rates were held [1][3]."]
 
-    response = client.post("/api/search", json={"question": "How popular is NumPy?"})
+    response = client.post("/api/search", json={"question": "Did the BoE hold rates?"})
 
     assert response.status_code == 200
     body = response.json()
     urls = [s["url"] for s in body["sources"]]
     assert "https://www.reuters.com/a" in urls
     assert "https://blog.example/b" not in urls
-    # Equal relevance, so trust × quality decides: the highly cited paper leads.
-    assert body["sources"][0]["title"] == "Array programming with NumPy"  # HTML stripped
-    assert body["text"] == "NumPy is widely used [1][3]."
+    assert "https://www.theguardian.com/business/2026/oct/01/bank-of-england-holds-rates" in urls
+    assert {s["family"] for s in body["sources"]} == {"news"}
+    assert body["text"] == "Rates were held [1][3]."
     assert [c["index"] for c in body["citations"]] == [1, 3]
     assert body["source_errors"] == {}
-    assert {"plan", "rank", "synthesize", "total", "source:openalex"} <= set(body["timings_ms"])
-
-
-def test_families_override_restricts_sources(
-    client: TestClient, fast: FakeChatModel, strong: FakeChatModel
-) -> None:
-    fast.structured = [
-        PlanOutput(intent="both", news_queries=["n"], academic_queries=["a"]),
-        all_relevant(1),
-    ]
-    strong.texts = ["A story [1]."]
-
-    response = client.post(
-        "/api/search", json={"question": "anything at all", "families": ["news"], "max_results": 1}
-    )
-
-    assert response.status_code == 200
-    assert [s["family"] for s in response.json()["sources"]] == ["news"]
+    assert {"plan", "rank", "synthesize", "total", "source:guardian"} <= set(body["timings_ms"])
 
 
 @pytest.mark.parametrize(
@@ -129,8 +113,6 @@ def test_families_override_restricts_sources(
         {"question": "hi"},
         {"question": "x" * 501},
         {"question": "   valid?   ", "max_results": 0},
-        {"question": "valid question", "families": []},
-        {"question": "valid question", "families": ["blogs"]},
         {
             "question": "valid question",
             "time_window": {"start": "2024-02-01", "end": "2024-01-01"},
@@ -142,7 +124,7 @@ def test_request_validation(client: TestClient, payload: dict[str, object]) -> N
 
 
 def test_empty_plan_is_422_with_message(client: TestClient, fast: FakeChatModel) -> None:
-    fast.structured = [PlanOutput(intent="news")]
+    fast.structured = [PlanOutput()]
     response = client.post("/api/search", json={"question": "asdf qwer"})
     assert response.status_code == 422
     assert "rephrasing" in response.json()["detail"]
@@ -158,28 +140,22 @@ def test_unconfigured_llm_is_503(api_settings: Settings) -> None:
 
 def test_sources_and_health(client: TestClient) -> None:
     sources = client.get("/api/sources").json()
-    assert {"id": "openalex", "family": "academic", "kind": "native", "trust": 0.9} | {
+    assert {"id": "guardian", "family": "news", "kind": "native", "trust": 0.85} | {
         "domains": []
     } in sources
 
     health = client.get("/health").json()
     assert health["status"] == "ok"
     assert health["llm_configured"] is False
-    assert health["sources"] == {
-        "openalex": True,
-        "crossref": True,
-        "news_search": True,
-        "academic_search": True,
-    }
+    assert health["sources"] == {"guardian": True, "news_search": True}
 
 
 def test_health_reports_missing_keys(settings: Settings) -> None:
     """The shipped trust list: keyless sources are ready, keyed ones report False."""
     with TestClient(create_app(settings, search_provider=FakeSearchProvider())) as test_client:
         status = test_client.get("/health").json()["sources"]
-    assert status["openalex"]
-    assert status["pubmed"]
-    assert status["arxiv"]
+    assert "gdelt" not in status  # disabled in the shipped list
+    assert status["news_search"]
     assert status["guardian"] is False
     assert status["nyt"] is False
 
@@ -187,13 +163,13 @@ def test_health_reports_missing_keys(settings: Settings) -> None:
 def test_stream_reports_progress_then_verified_answer(
     client: TestClient, fast: FakeChatModel, strong: FakeChatModel
 ) -> None:
-    fast.structured = [PlanOutput(intent="academic", academic_queries=["numpy"]), all_relevant(2)]
-    strong.texts = ["NumPy is widely used [1]. It is slow [2]."]
+    fast.structured = [PlanOutput(news_queries=["bank of england"]), all_relevant(3)]
+    strong.texts = ["Rates were held [1]. The vote was unanimous [2]."]
     strong.structured = [
         Verification(verdicts=[ClaimVerdict(claim=1, supported_by=[1]), ClaimVerdict(claim=2)])
     ]
 
-    response = client.get("/api/search/stream", params={"q": "How popular is NumPy?"})
+    response = client.get("/api/search/stream", params={"q": "Did the BoE hold rates?"})
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
@@ -204,18 +180,18 @@ def test_stream_reports_progress_then_verified_answer(
     assert names.index("source_started") < names.index("source_done") < names.index("ranked")
     assert names.index("ranked") < names.index("token") < names.index("answer")
     done = {data["source"]: data for name, data in events if name == "source_done"}
-    assert done.keys() == {"openalex", "academic_search"}
-    assert done["openalex"]["count"] == 2
+    assert done.keys() == {"guardian", "news_search"}
+    assert done["guardian"]["count"] == 2
     draft = "".join(data["text"] for name, data in events if name == "token")
-    assert draft == "NumPy is widely used [1]. It is slow [2]."
+    assert draft == "Rates were held [1]. The vote was unanimous [2]."
     answer = events[-2][1]
-    assert answer["text"] == "NumPy is widely used [1]."
+    assert answer["text"] == "Rates were held [1]."
     assert answer["unsupported_claims_removed"] == 1
     assert "verify" in answer["timings_ms"]
 
 
 def test_stream_reports_empty_plan_as_error_event(client: TestClient, fast: FakeChatModel) -> None:
-    fast.structured = [PlanOutput(intent="news")]
+    fast.structured = [PlanOutput()]
     events = sse_events(client.get("/api/search/stream", params={"q": "asdf qwer"}).text)
     assert [name for name, _ in events] == ["error", "done"]
     assert events[0][1]["status"] == 422
@@ -223,7 +199,7 @@ def test_stream_reports_empty_plan_as_error_event(client: TestClient, fast: Fake
 
 @pytest.mark.parametrize(
     "params",
-    [{"q": "hi"}, {"q": "valid question", "families": "blogs"}, {"q": "valid", "max_results": 0}],
+    [{"q": "hi"}, {"q": "x" * 501}, {"q": "valid", "max_results": 0}],
 )
 def test_stream_validation(client: TestClient, params: dict[str, object]) -> None:
     assert client.get("/api/search/stream", params=params).status_code == 422
@@ -231,7 +207,7 @@ def test_stream_validation(client: TestClient, params: dict[str, object]) -> Non
 
 def test_searches_are_rate_limited_per_client(api_settings: Settings, fast: FakeChatModel) -> None:
     limited = api_settings.model_copy(update={"search_rate_limit_per_minute": 1})
-    fast.structured = [PlanOutput(intent="news"), PlanOutput(intent="news")]
+    fast.structured = [PlanOutput(), PlanOutput()]
     app = create_app(limited, fake_models(fast, FakeChatModel()), FakeSearchProvider())
     with TestClient(app) as test_client:
         assert test_client.post("/api/search", json={"question": "asdf qwer"}).status_code == 422

@@ -1,40 +1,12 @@
 # Trusted sources. Every adapter is registered by `id` (native) or covered by the
 # domain-restricted web search (search). Edit trust weights and toggles here; no code changes needed.
 #
-#   family: news | academic
+#   family: news
 #   kind:   native (dedicated API adapter) | search (web search restricted to `domains`)
-#           | enrichment (metadata lookups, not searched)
 #   trust:  0–1, multiplied into the ranking score
 #   rate_limit_per_sec: the provider's published limit, enforced per process
 
 sources:
-  # --- Academic: native APIs ---
-  - id: openalex
-    family: academic
-    kind: native
-    trust: 0.9
-    rate_limit_per_sec: 10
-  - id: semantic_scholar
-    family: academic
-    kind: native
-    trust: 0.85
-    rate_limit_per_sec: 1        # shared pool without SEMANTIC_SCHOLAR_API_KEY is often throttled
-  - id: pubmed
-    family: academic
-    kind: native
-    trust: 0.9
-    rate_limit_per_sec: 3        # 10 with NCBI_API_KEY; only runs for biomedical questions
-  - id: arxiv
-    family: academic
-    kind: native
-    trust: 0.75                  # preprints; also discounted by ranking
-    rate_limit_per_sec: 0.33
-  - id: crossref
-    family: academic
-    kind: enrichment
-    trust: 0.9
-    rate_limit_per_sec: 10
-
   # --- News: native APIs ---
   - id: guardian
     family: news
@@ -49,6 +21,9 @@ sources:
   - id: gdelt
     family: news
     kind: native
+    # Off: from this network GDELT takes 10-12s per reply (over ADAPTER_TIMEOUT_SECONDS) and
+    # answers with 429 even when requests are spaced well apart. Re-enable if that improves.
+    enabled: false
     trust: 0.8                   # capped by the matched outlet's own trust
     rate_limit_per_sec: 0.2      # one request per 5 seconds
 
@@ -104,39 +79,3 @@ sources:
     domains: [bloomberg.com]
     trust: 0.85
 
-  # --- Academic: domain-restricted search ---
-  - id: nature
-    family: academic
-    kind: search
-    domains: [nature.com]
-    trust: 0.9
-  - id: science
-    family: academic
-    kind: search
-    domains: [science.org]
-    trust: 0.9
-  - id: lancet
-    family: academic
-    kind: search
-    domains: [thelancet.com]
-    trust: 0.9
-  - id: nejm
-    family: academic
-    kind: search
-    domains: [nejm.org]
-    trust: 0.9
-  - id: cell
-    family: academic
-    kind: search
-    domains: [cell.com]
-    trust: 0.85
-  - id: pnas
-    family: academic
-    kind: search
-    domains: [pnas.org]
-    trust: 0.85
-  - id: plos
-    family: academic
-    kind: search
-    domains: [plos.org]
-    trust: 0.8

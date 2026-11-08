@@ -1,1 +1,1 @@
-"""Footnote: cited answers from trusted news and academic sources."""
+"""Footnote: cited answers from trusted news sources."""

@@ -7,7 +7,7 @@ from datetime import date
 from functools import wraps
 from typing import Annotated, Any, NotRequired, Protocol, Required, TypedDict
 
-from footnote.models import Answer, Family, QueryPlan, SourceResult
+from footnote.models import Answer, QueryPlan, SourceResult
 
 
 def merge_dicts[K, V](left: dict[K, V], right: dict[K, V]) -> dict[K, V]:
@@ -18,12 +18,11 @@ class GraphState(TypedDict, total=False):
     # Request
     question: Required[str]
     max_results: Required[int]
-    families: NotRequired[list[Family] | None]
     time_window: NotRequired[tuple[date, date] | None]
     # Pipeline
     plan: QueryPlan
     results: Annotated[list[SourceResult], operator.add]  # raw, appended by parallel sources
-    candidates: list[SourceResult]  # normalized, deduped, enriched
+    candidates: list[SourceResult]  # normalized and deduped
     ranked: list[SourceResult]  # top results, in citation order
     answer: Answer
     # Observability; adapters write these in parallel, hence the reducers

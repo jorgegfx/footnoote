@@ -1,11 +1,9 @@
-from footnote.models import Family
 from tests.fakes import make_result
 
 
-def test_result_id_is_stable_and_prefers_doi() -> None:
-    a = make_result(1, url="https://a.org/x", doi="10.1/ABC")
-    b = make_result(1, url="https://b.org/y", doi="10.1/abc")
-    c = make_result(1, url="https://a.org/x")
+def test_result_id_is_stable_per_url() -> None:
+    a = make_result(1, url="https://a.org/x")
+    b = make_result(2, url="https://a.org/x", title="Other title")
+    c = make_result(1, url="https://a.org/y")
     assert a.id == b.id
     assert a.id != c.id
-    assert c.id == make_result(1, url="https://a.org/x", family=Family.NEWS).id

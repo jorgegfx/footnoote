@@ -1,6 +1,6 @@
 # Footnote
 
-Footnote is an AI search engine that answers questions **only from trusted news and academic sources**. It queries a curated set of sources in parallel (OpenAlex, PubMed, arXiv, Semantic Scholar, The Guardian, NYT, GDELT, plus a web search restricted to whitelisted outlets), ranks and deduplicates the results, and writes an answer in which every claim carries a numbered citation. A second pass checks each cited sentence against its sources and removes anything they don't support.
+Footnote is an AI search engine that answers questions **only from trusted news sources**. It queries a curated set of sources in parallel (The Guardian, NYT, GDELT, plus a web search restricted to whitelisted outlets), ranks and deduplicates the results, and writes an answer in which every claim carries a numbered citation. A second pass checks each cited sentence against its sources and removes anything they don't support.
 
 If the trusted sources don't contain enough evidence, Footnote says so instead of filling the gap.
 
@@ -19,7 +19,7 @@ Open <http://localhost:8000>, type a question, and press **Search**.
 
 ### Minimum configuration
 
-Edit `.env`. To get answers you need an LLM and, for news, a web search key:
+Edit `.env`. To get answers you need an LLM and a web search key:
 
 ```dotenv
 # Any provider supported by LangChain's init_chat_model. Example: Anthropic
@@ -31,22 +31,44 @@ ANTHROPIC_API_KEY=...
 SEARCH_PROVIDER=tavily               # the only provider implemented so far
 SEARCH_API_KEY=...                   # https://tavily.com
 
-CONTACT_EMAIL=you@example.org        # sent to APIs that ask for a contact
+CONTACT_EMAIL=you@example.org        # sent in the User-Agent
 ```
 
 For another provider, set `LLM_PROVIDER` (for example `openai`), install its package (`uv add langchain-openai`), and set its API key variable.
 
+To run against a local model in [LM Studio](https://lmstudio.ai/), start its server (Developer tab, Start Server), load the models, and use its OpenAI-compatible endpoint:
+
+```dotenv
+LLM_PROVIDER=openai
+LLM_BASE_URL=http://localhost:1234/v1
+LLM_MODEL_FAST=qwen2.5-7b-instruct   # model ids as listed by GET /v1/models
+LLM_MODEL_STRONG=qwen/qwen3-14b
+OPENAI_API_KEY=lm-studio             # any non-empty value; LM Studio ignores it
+```
+
+Pick models that support structured (JSON schema) output; planning, ranking and verification depend on it.
+
+To use [Ollama Cloud](https://ollama.com/), install `uv add langchain-ollama` and create an API key at ollama.com/settings/keys:
+
+```dotenv
+LLM_PROVIDER=ollama
+LLM_BASE_URL=https://ollama.com
+LLM_MODEL_FAST=gemma4:31b
+LLM_MODEL_STRONG=gemma4:31b   # models must write citations as [n]
+LLM_STRUCTURED_OUTPUT_METHOD=function_calling   # Ollama Cloud doesn't enforce JSON schemas
+OLLAMA_API_KEY=...
+```
+
+If the logs show `relevance scoring failed` or `verification failed (OutputParserException)`, the model isn't returning the requested structure; try `LLM_STRUCTURED_OUTPUT_METHOD=function_calling` or another model.
+
 ### Optional source keys
 
-OpenAlex, PubMed, arXiv, GDELT and Crossref work without keys. The rest are skipped until you add a key:
+GDELT works without a key. The Guardian and NYT are skipped until you add theirs:
 
 | Variable | Source | Notes |
 |---|---|---|
 | `GUARDIAN_API_KEY` | The Guardian | Required for this source. Free at open-platform.theguardian.com |
 | `NYT_API_KEY` | New York Times | Required for this source. developer.nytimes.com |
-| `NCBI_API_KEY` | PubMed | Optional; raises the rate limit |
-| `SEMANTIC_SCHOLAR_API_KEY` | Semantic Scholar | Optional; the shared keyless pool is often throttled |
-| `OPENALEX_API_KEY` | OpenAlex | Optional |
 
 To see which sources are ready, check `GET /health`.
 
@@ -59,9 +81,9 @@ The page at `/` streams the whole search as it happens:
 1. **Plan**: the search queries Footnote decided to run.
 2. **Sources**: each source reports back with its result count, or a quiet error such as "timed out". One failing source never fails the search.
 3. **Answer**: the draft streams in, labeled *checking citations*. It is then replaced by the verified answer, which notes how many unsupported claims were removed.
-4. **Source cards**: title, outlet or journal, date, and a **Preprint** badge where it applies. Click any `[n]` in the answer to jump to its card.
+4. **Source cards**: title, outlet, date, and how many other outlets carried the same story. Click any `[n]` in the answer to jump to its card.
 
-Use the **News** and **Academic** toggles to restrict the source families. Searches are shareable as links: `http://localhost:8000/?q=does+coffee+raise+blood+pressure`.
+Searches are shareable as links: `http://localhost:8000/?q=what+did+the+fed+decide`.
 
 ### API
 
@@ -70,11 +92,10 @@ Use the **News** and **Academic** toggles to restrict the source families. Searc
 ```bash
 curl -s localhost:8000/api/search \
   -H 'Content-Type: application/json' \
-  -d '{"question": "Does intermittent fasting improve longevity?"}'
+  -d '{"question": "What did the Fed decide at its last meeting?"}'
 ```
 
 Optional body fields:
-- `families`: `["news"]`, `["academic"]` or both.
 - `max_results`: number of sources to keep, 1–30 (default 12).
 - `time_window`: for example `{"start": "2026-01-01", "end": "2026-06-30"}`.
 
@@ -87,14 +108,14 @@ The response contains:
 **Streaming (Server-Sent Events)**
 
 ```bash
-curl -N 'localhost:8000/api/search/stream?q=How+do+mRNA+vaccines+work%3F&families=academic'
+curl -N 'localhost:8000/api/search/stream?q=What+is+the+latest+on+EU+AI+regulation%3F'
 ```
 
-Query parameters are `q`, `families` (repeatable), `max_results`, `start` and `end`. Events arrive in this order:
+Query parameters are `q`, `max_results`, `start` and `end`. Events arrive in this order:
 
 | Event | Meaning |
 |---|---|
-| `plan` | The question type and the queries to run |
+| `plan` | The queries to run and any time window |
 | `source_started`, `source_done`, `source_error` | Progress for each source |
 | `ranked` | The final numbered source list |
 | `token` | Draft answer text, before verification |
@@ -119,7 +140,7 @@ Sources live in [`config/sources.yaml`](config/sources.yaml). You can change the
 ```yaml
 - id: reuters
   family: news
-  kind: search          # native | search | enrichment
+  kind: search          # native | search
   domains: [reuters.com]
   trust: 0.95           # 0–1, multiplied into the ranking score
   enabled: true

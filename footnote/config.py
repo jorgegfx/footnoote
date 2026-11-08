@@ -20,15 +20,17 @@ class Settings(BaseSettings):
     llm_provider: str | None = None
     llm_model_fast: str | None = None
     llm_model_strong: str | None = None
+    llm_base_url: str | None = None  # e.g. a local server, or Ollama Cloud
+    # Unset uses the provider's default; function_calling for servers that ignore JSON schemas.
+    llm_structured_output_method: Literal["json_schema", "function_calling", "json_mode"] | None = (
+        None
+    )
 
     search_provider: str = "tavily"
     search_api_key: SecretStr | None = None
 
-    openalex_api_key: SecretStr | None = None
     guardian_api_key: SecretStr | None = None
     nyt_api_key: SecretStr | None = None
-    ncbi_api_key: SecretStr | None = None
-    semantic_scholar_api_key: SecretStr | None = None
 
     contact_email: str | None = None
     cache_ttl_seconds: int = 900
@@ -40,6 +42,14 @@ class Settings(BaseSettings):
     http_max_retries: int = Field(default=2, ge=0, le=5)
     search_rate_limit_per_minute: int = Field(default=30, ge=0)  # per client IP; 0 disables
 
+    @field_validator("search_api_key", "guardian_api_key", "nyt_api_key", mode="before")
+    @classmethod
+    def _blank_key_is_unset(cls, value: object) -> object:
+        """`NYT_API_KEY=` in `.env` means "no key", so the source is skipped, not called."""
+        if isinstance(value, SecretStr):
+            value = value.get_secret_value()
+        return None if isinstance(value, str) and not value.strip() else value
+
     def secret_values(self) -> list[str]:
         """Every configured credential, for log redaction."""
         values = (getattr(self, name) for name in type(self).model_fields)
@@ -49,7 +59,7 @@ class Settings(BaseSettings):
 class SourceConfig(BaseModel):
     id: str
     family: Family
-    kind: Literal["native", "search", "enrichment"]
+    kind: Literal["native", "search"]
     trust: float = Field(ge=0, le=1)
     enabled: bool = True
     rate_limit_per_sec: float | None = None

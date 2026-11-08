@@ -21,7 +21,7 @@ from footnote.citations import (
     tidy,
 )
 from footnote.graph.state import GraphState, Node, timed
-from footnote.llm import ModelFactory
+from footnote.llm import ModelFactory, structured
 from footnote.models import Citation, SourceResult
 from footnote.prompts import load_prompt, source_blocks
 
@@ -61,7 +61,7 @@ async def judge_claims(
 ) -> dict[int, set[int]]:
     """Map claim index → the cited sources that support it. Claims the model skipped are
     absent. Also used by the eval suite to measure citation precision."""
-    checker = models("strong").with_structured_output(Verification)
+    checker = structured(models("strong"), Verification)
     output = await checker.ainvoke(
         [
             SystemMessage(load_prompt("verify").substitute()),

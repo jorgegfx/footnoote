@@ -8,8 +8,6 @@
   --accent-soft: #f6e9df;
   --ok: #2f6b3a;
   --warn: #9a5b00;
-  --preprint: #6a4c93;
-  --preprint-soft: #efe8f8;
   --highlight: #fff3c4;
   --radius: 10px;
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
@@ -28,8 +26,6 @@
     --accent-soft: #3a2a1f;
     --ok: #7fc28b;
     --warn: #e0b060;
-    --preprint: #c4a8ec;
-    --preprint-soft: #2e2639;
     --highlight: #4a3f16;
   }
 }
@@ -84,20 +80,6 @@ body {
 }
 @media (prefers-color-scheme: dark) { .search button { color: #1b1209; } }
 .search button:disabled { opacity: 0.6; cursor: progress; }
-
-.families { display: flex; gap: 8px; border: 0; padding: 0; margin: 10px 0 0; }
-.toggle {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 12px;
-  font-size: 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  cursor: pointer;
-  user-select: none;
-}
-.toggle:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
-.toggle input { accent-color: var(--accent); margin: 0; }
 
 .notice {
   margin: 20px 0 0;
@@ -189,15 +171,6 @@ body {
 .source-title { font-weight: 600; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
 .source-title:hover { text-decoration: underline; }
 .source-meta { grid-column: 2; color: var(--muted); font-size: 0.85rem; display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.badge {
-  font-size: 0.72rem;
-  font-weight: 600;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.badge.preprint { background: var(--preprint-soft); color: var(--preprint); }
 .source-snippet { grid-column: 2; margin: 4px 0 0; font-size: 0.9rem; color: var(--muted); }
 
 .footer {

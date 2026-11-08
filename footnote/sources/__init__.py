@@ -1,4 +1,4 @@
-"""Builds the adapter set and enricher for the enabled sources."""
+"""Builds the adapter set for the enabled sources."""
 
 import logging
 
@@ -7,13 +7,9 @@ import httpx
 from footnote.cache import Cache
 from footnote.config import Settings, SourcesConfig
 from footnote.models import Family
-
-# Importing the adapter modules registers them.
-from footnote.sources.academic import arxiv, openalex, pubmed, semantic_scholar  # noqa: F401
-from footnote.sources.academic.crossref import CrossrefEnricher
 from footnote.sources.base import SourceAdapter, native_adapter_class
 from footnote.sources.cached import CachedAdapter
-from footnote.sources.news import gdelt, guardian, nyt  # noqa: F401
+from footnote.sources.news import gdelt, guardian, nyt  # noqa: F401  (registers adapters)
 from footnote.sources.search.base import WebSearchAdapter, WebSearchProvider
 from footnote.sources.search.tavily import TavilyProvider
 
@@ -33,14 +29,11 @@ def build_search_provider(settings: Settings, client: httpx.AsyncClient) -> WebS
 
 
 def source_status(settings: Settings, sources: SourcesConfig) -> dict[str, bool]:
-    """Whether each enabled native/enrichment source can run (adapter exists, keys present)."""
+    """Whether each enabled native source can run (adapter exists, keys present)."""
     status: dict[str, bool] = {}
-    for config in sources.enabled():
-        if config.kind == "native":
-            cls = native_adapter_class(config.id)
-            status[config.id] = cls is not None and cls.is_configured(settings)
-        elif config.kind == "enrichment":
-            status[config.id] = config.id == "crossref"
+    for config in sources.native():
+        cls = native_adapter_class(config.id)
+        status[config.id] = cls is not None and cls.is_configured(settings)
     return status
 
 
@@ -74,17 +67,3 @@ def build_adapters(
         ttl = settings.cache_ttl_seconds
         adapters = [CachedAdapter(a, cache, ttl) for a in adapters]
     return adapters
-
-
-def build_enricher(
-    settings: Settings,
-    sources: SourcesConfig,
-    client: httpx.AsyncClient,
-    cache: Cache | None = None,
-) -> CrossrefEnricher | None:
-    config = sources.get("crossref")
-    if config is None:
-        return None
-    return CrossrefEnricher(
-        settings, client, cache, settings.cache_ttl_seconds, config.rate_limit_per_sec
-    )

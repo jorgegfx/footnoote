@@ -21,7 +21,7 @@ Category = Literal["recent_news", "established_science", "contested", "no_good_a
 
 # Sources whose URLs come from discovery (web search, GDELT) rather than a trusted native API;
 # every URL they contribute must be on the whitelist.
-DISCOVERY_SOURCES = frozenset({"news_search", "academic_search", "gdelt"})
+DISCOVERY_SOURCES = frozenset({"news_search", "gdelt"})
 
 _INSUFFICIENT = re.compile(
     r"(?i)\b(?:insufficient|not enough|don't contain enough|do not contain enough|"
@@ -35,7 +35,6 @@ class Question(BaseModel):
     category: Category
     question: str
     insufficient: bool = False
-    families: list[Family] | None = None
 
 
 class QuestionScore(BaseModel):

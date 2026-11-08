@@ -16,7 +16,7 @@ from footnote.prompts import load_prompt, source_blocks
 
 NO_RESULTS = (
     "I couldn't find anything from the trusted sources for this question, so I can't answer it. "
-    "Try rephrasing, or widening the time range or source families."
+    "Try rephrasing, or widening the time range."
 )
 
 

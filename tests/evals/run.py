@@ -59,7 +59,7 @@ async def check_citations(models: ModelFactory, question: str, answer: Answer) -
 async def score_question(
     runtime: Runtime, models: ModelFactory | None, sources: SourcesConfig, q: Question
 ) -> tuple[QuestionScore, Answer | None]:
-    initial: GraphState = {"question": q.question, "max_results": 12, "families": q.families}
+    initial: GraphState = {"question": q.question, "max_results": 12}
     start = time.perf_counter()
     try:
         answer = finish(dict(await runtime.graph.ainvoke(initial)), start)

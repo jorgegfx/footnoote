@@ -32,7 +32,7 @@ from footnote.http import RetryTransport
 from footnote.llm import LLMNotConfiguredError, ModelFactory, model_factory
 from footnote.models import Answer, Family
 from footnote.observability import configure_logging, request_id
-from footnote.sources import build_adapters, build_enricher, source_status
+from footnote.sources import build_adapters, source_status
 from footnote.sources.base import SourceAdapter
 from footnote.sources.search.base import WebSearchProvider
 
@@ -57,7 +57,6 @@ class TimeWindow(BaseModel):
 
 class SearchRequest(BaseModel):
     question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=500)]
-    families: list[Family] | None = Field(default=None, min_length=1)
     max_results: int = Field(default=12, ge=1, le=30)
     time_window: TimeWindow | None = None
 
@@ -117,7 +116,6 @@ def initial_state(body: SearchRequest) -> GraphState:
     return {
         "question": body.question,
         "max_results": body.max_results,
-        "families": body.families,
         "time_window": (body.time_window.start, body.time_window.end) if body.time_window else None,
     }
 
@@ -147,7 +145,6 @@ def sse(event: str, data: Any) -> str:
 
 def stream_request(
     q: Annotated[str, Query(description="The question.")],
-    families: Annotated[list[Family] | None, Query()] = None,
     max_results: int = 12,
     start: date | None = None,
     end: date | None = None,
@@ -155,7 +152,7 @@ def stream_request(
     window = {"start": start, "end": end} if start and end else None
     try:
         return SearchRequest.model_validate(
-            {"question": q, "families": families, "max_results": max_results, "time_window": window}
+            {"question": q, "max_results": max_results, "time_window": window}
         )
     except ValidationError as exc:
         raise RequestValidationError(exc.errors()) from exc
@@ -220,14 +217,12 @@ async def open_runtime(
         follow_redirects=True,
         transport=RetryTransport(max_retries=settings.http_max_retries),
     ) as client:
-        cache = TTLCache()
-        adapters = build_adapters(settings, sources, client, search_provider, cache)
+        adapters = build_adapters(settings, sources, client, search_provider, TTLCache())
         graph = build_graph(
             GraphDeps(
                 models=models or model_factory(settings),
                 adapters=adapters,
                 adapter_timeout=settings.adapter_timeout_seconds,
-                enricher=build_enricher(settings, sources, client, cache),
             )
         )
         limiter = ClientRateLimiter(settings.search_rate_limit_per_minute)

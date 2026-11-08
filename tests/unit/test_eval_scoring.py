@@ -1,7 +1,7 @@
 from footnote.config import SourcesConfig
 from footnote.graph.nodes.synthesize import NO_RESULTS
 from footnote.graph.nodes.verify import ClaimVerdict, Verification
-from footnote.models import Answer, Citation, Family
+from footnote.models import Answer, Citation
 from tests.evals.run import check_citations
 from tests.evals.scoring import (
     QuestionScore,
@@ -16,7 +16,7 @@ from tests.fakes import FakeChatModel, fake_models, make_result
 
 
 def answer(text: str, cited: list[int], **overrides: object) -> Answer:
-    sources = [make_result(1), make_result(2, Family.NEWS)]
+    sources = [make_result(1), make_result(2)]
     fields: dict[str, object] = {
         "text": text,
         "sources": sources,
@@ -46,15 +46,14 @@ def test_says_insufficient() -> None:
 
 
 def test_whitelist_violations_only_checks_discovery_sources(sources: SourcesConfig) -> None:
-    ok = make_result(1, Family.NEWS, source_id="news_search", url="https://www.reuters.com/a")
+    ok = make_result(1, source_id="news_search", url="https://www.reuters.com/a")
     bad = make_result(
         2,
-        Family.NEWS,
         source_id="gdelt",
         url="https://apnews.com/b",
         alt_urls=["https://blog.example/copy"],
     )
-    native = make_result(3, source_id="openalex", url="https://doi.org/10.1/x")
+    native = make_result(3, source_id="guardian", url="https://guardian.example/x")
     result = answer("x", [], sources=[ok, bad, native])
     assert whitelist_violations(result, sources) == ["https://blog.example/copy"]
 
@@ -63,7 +62,7 @@ def test_distinct_outlets_prefers_venue_then_host() -> None:
     sources = [
         make_result(1, venue="Nature"),
         make_result(2, venue="nature"),
-        make_result(3, Family.NEWS, url="https://www.reuters.com/x"),
+        make_result(3, url="https://www.reuters.com/x"),
     ]
     assert distinct_outlets(answer("x", [], sources=sources)) == 2
 

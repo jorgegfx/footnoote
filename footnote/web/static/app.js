@@ -4,15 +4,10 @@
 "use strict";
 
 const SOURCE_NAMES = {
-  openalex: "OpenAlex",
-  semantic_scholar: "Semantic Scholar",
-  pubmed: "PubMed",
-  arxiv: "arXiv",
   guardian: "The Guardian",
   nyt: "New York Times",
   gdelt: "GDELT",
   news_search: "News web search",
-  academic_search: "Academic web search",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -144,8 +139,6 @@ function renderSources(sources) {
       source.authors && source.authors.length
         ? `<span>${escapeHtml(source.authors.slice(0, 3).join(", "))}${source.authors.length > 3 ? " et al." : ""}</span>`
         : "",
-      `<span class="badge">${source.family === "news" ? "News" : "Academic"}</span>`,
-      source.is_preprint ? `<span class="badge preprint" title="Not yet peer reviewed">Preprint</span>` : "",
       source.alt_urls && source.alt_urls.length
         ? `<span>also at ${source.alt_urls.length} other link${source.alt_urls.length > 1 ? "s" : ""}</span>`
         : "",
@@ -278,14 +271,13 @@ async function errorMessage(response) {
   return `Search failed (HTTP ${response.status}).`;
 }
 
-async function search(question, families) {
+async function search(question) {
   if (controller) controller.abort();
   controller = new AbortController();
   reset();
   els.submit.disabled = true;
 
   const params = new URLSearchParams({ q: question });
-  if (families.length === 1) params.append("families", families[0]);
   const on = handlers();
 
   try {
@@ -321,19 +313,14 @@ async function search(question, families) {
 els.form.addEventListener("submit", (event) => {
   event.preventDefault();
   const question = els.q.value.trim();
-  const families = [...els.form.querySelectorAll('input[name="family"]:checked')].map((i) => i.value);
   if (question.length < 3) {
     setNotice("Please enter a question of at least 3 characters.");
-    return;
-  }
-  if (!families.length) {
-    setNotice("Pick at least one of News or Academic.");
     return;
   }
   const url = new URL(window.location.href);
   url.searchParams.set("q", question);
   history.replaceState(null, "", url);
-  search(question, families);
+  search(question);
 });
 
 // Citation clicks scroll to the source card and flash it.

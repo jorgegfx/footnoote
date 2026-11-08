@@ -1,9 +1,9 @@
-"""normalize: clean HTML to text, truncate snippets, and canonicalize URLs and identifiers."""
+"""normalize: clean HTML to text, truncate snippets, and canonicalize URLs."""
 
 from typing import Any
 
 from footnote.graph.state import GraphState, timed
-from footnote.identifiers import clean_url, normalize_arxiv_id, normalize_doi
+from footnote.identifiers import clean_url
 from footnote.models import SourceResult, result_id
 from footnote.text import html_to_text, truncate
 from footnote.whitelist import host_of
@@ -19,16 +19,13 @@ def normalize_result(result: SourceResult) -> SourceResult | None:
     if not title:
         return None
     url = clean_url(result.url)
-    doi = normalize_doi(result.doi)
     return result.model_copy(
         update={
-            "id": result_id(doi=doi, url=url),
+            "id": result_id(url),
             "title": title,
             "url": url,
             "alt_urls": [clean_url(u) for u in result.alt_urls if host_of(u)],
             "snippet": truncate(html_to_text(result.snippet), SNIPPET_CHARS),
-            "doi": doi,
-            "arxiv_id": normalize_arxiv_id(result.arxiv_id),
             "authors": [a for a in (html_to_text(a) for a in result.authors) if a],
             "venue": html_to_text(result.venue) if result.venue else None,
         }

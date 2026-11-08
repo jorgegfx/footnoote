@@ -1,5 +1,6 @@
 """Domain-restricted web search: provider interface and the adapter that enforces the whitelist."""
 
+import asyncio
 from datetime import date
 from typing import Protocol
 
@@ -48,15 +49,27 @@ class WebSearchAdapter:
         domains = self.sources.search_domains(self.family)
         if not domains:
             return []
+        # Queries run concurrently: one at a time, three of them overrun the adapter time limit.
+        outcomes = await asyncio.gather(
+            *(
+                self.provider.search(
+                    query,
+                    domains=domains,
+                    family=self.family,
+                    time_window=plan.time_window,
+                    max_results=PER_QUERY,
+                )
+                for query in plan.queries.get(self.family, [])
+            ),
+            return_exceptions=True,
+        )
+        hit_lists = [o for o in outcomes if not isinstance(o, BaseException)]
+        if outcomes and not hit_lists:  # one failed query is tolerated; all failing is an error
+            failure = outcomes[0]
+            assert isinstance(failure, BaseException)
+            raise failure
         results: dict[str, SourceResult] = {}
-        for query in plan.queries.get(self.family, []):
-            hits = await self.provider.search(
-                query,
-                domains=domains,
-                family=self.family,
-                time_window=plan.time_window,
-                max_results=PER_QUERY,
-            )
+        for hits in hit_lists:
             for hit in hits:
                 result = self._to_result(hit)
                 if result is not None:

@@ -1,17 +1,19 @@
+import asyncio
 import json
+import time
 from datetime import date
 
 import httpx
+import pytest
 import respx
 
 from footnote.config import SourcesConfig
 from footnote.models import Family, QueryPlan
-from footnote.sources.search.base import WebSearchAdapter
+from footnote.sources.search.base import WebHit, WebSearchAdapter
 from footnote.sources.search.tavily import API_URL, TavilyProvider
 from tests.conftest import load_fixture
 
 PLAN = QueryPlan(
-    intent="news",
     queries={Family.NEWS: ["fed rate decision"]},
     time_window=(date(2026, 9, 1), date(2026, 10, 15)),
 )
@@ -51,18 +53,47 @@ async def test_results_are_rechecked_against_whitelist(sources: SourcesConfig) -
     assert bbc.published_at == date(2026, 10, 2)
 
 
-@respx.mock
-async def test_academic_search_uses_general_topic_and_academic_domains(
-    sources: SourcesConfig,
-) -> None:
-    route = respx.post(API_URL).respond(json=load_fixture("tavily_news.json"))
-    adapter = WebSearchAdapter(Family.ACADEMIC, TavilyProvider("key", httpx.AsyncClient()), sources)
-    plan = QueryPlan(intent="academic", queries={Family.ACADEMIC: ["crispr off-target"]})
+class SlowProvider:
+    """Each query takes `delay`; queries listed in `failing` raise."""
 
-    results = await adapter.search(plan)
+    name = "slow"
 
-    body = json.loads(route.calls.last.request.content)
-    assert body["topic"] == "general"
-    assert "nature.com" in body["include_domains"]
-    assert "reuters.com" not in body["include_domains"]
-    assert results == []  # news URLs aren't on the academic whitelist
+    def __init__(self, delay: float, failing: frozenset[str] = frozenset()) -> None:
+        self.delay = delay
+        self.failing = failing
+
+    async def search(
+        self,
+        query: str,
+        *,
+        domains: list[str],
+        family: Family,
+        time_window: tuple[date, date] | None,
+        max_results: int,
+    ) -> list[WebHit]:
+        await asyncio.sleep(self.delay)
+        if query in self.failing:
+            raise httpx.ConnectError("down")
+        return [WebHit(title=query, url=f"https://www.reuters.com/{query}")]
+
+
+THREE = QueryPlan(queries={Family.NEWS: ["a", "b", "c"]})
+
+
+async def test_queries_run_concurrently(sources: SourcesConfig) -> None:
+    adapter = WebSearchAdapter(Family.NEWS, SlowProvider(0.1), sources)
+    start = time.perf_counter()
+    results = await adapter.search(THREE)
+    assert time.perf_counter() - start < 0.25  # three 0.1s queries, not 0.3s+
+    assert [r.title for r in results] == ["a", "b", "c"]
+
+
+async def test_one_failed_query_keeps_the_others(sources: SourcesConfig) -> None:
+    adapter = WebSearchAdapter(Family.NEWS, SlowProvider(0, frozenset({"b"})), sources)
+    assert [r.title for r in await adapter.search(THREE)] == ["a", "c"]
+
+
+async def test_all_queries_failing_is_an_error(sources: SourcesConfig) -> None:
+    adapter = WebSearchAdapter(Family.NEWS, SlowProvider(0, frozenset({"a", "b", "c"})), sources)
+    with pytest.raises(httpx.ConnectError):
+        await adapter.search(THREE)

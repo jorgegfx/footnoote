@@ -2,14 +2,14 @@
 
 ## What this project is
 
-**Footnote** is an AI search engine that answers a user's question by collecting results from a curated set of **trusted news and academic sources**, ranking and deduplicating them, and synthesizing a **cited answer** in which every claim links back to a retrieved source. It is not a general web search: content from outside the trusted set must never reach the answer.
+**Footnote** is an AI search engine that answers a user's question by collecting results from a curated set of **trusted news sources**, ranking and deduplicating them, and synthesizing a **cited answer** in which every claim links back to a retrieved source. It is not a general web search: content from outside the trusted set must never reach the answer.
 
 First version: a FastAPI backend with a LangGraph pipeline and a simple web UI.
 
 ## Scope
 
 **In scope (v1)**
-- Source families: **news** and **academic/scientific**.
+- Source family: **news** only (academic sources were removed; the `Family` enum is kept so another family could be added later).
 - Hybrid retrieval: native source APIs where available, plus a web search API restricted to whitelisted domains.
 - Cited answer synthesis with inline numbered citations and a source list.
 - Streaming progress (sources being queried, results found, answer tokens).
@@ -39,39 +39,29 @@ First version: a FastAPI backend with a LangGraph pipeline and a simple web UI.
 
 ```
 question
-  └─► plan ──► fan_out ──┬─► source (openalex)     ─┐
-                         ├─► source (pubmed)       │
-                         ├─► source (news_search)  ├─► normalize ─► dedupe ─► enrich ─► rank ─► synthesize ─► verify ─► answer
+  └─► plan ──► fan_out ──┬─► source (guardian)     ─┐
+                         ├─► source (gdelt)        │
+                         ├─► source (news_search)  ├─► normalize ─► dedupe ─► rank ─► synthesize ─► verify ─► answer
                          └─► source (…one per     ─┘
                               accepting adapter)
 ```
 
-1. **plan** (`fast` LLM): classify the question (news / academic / both), extract entities and time window, flag biomedical questions, produce 1–3 query rewrites per source family. Output: `QueryPlan`.
-2. **fan_out**: one LangGraph `Send` per adapter whose `accepts(plan)` is true (family has queries; PubMed also needs `plan.biomedical`). Each runs in the `source` node; with none, the graph goes straight to normalize.
+1. **plan** (`fast` LLM): extract entities and time window and produce 1–3 news query rewrites. Output: `QueryPlan`.
+2. **fan_out**: one LangGraph `Send` per adapter whose `accepts(plan)` is true (its family has queries). Each runs in the `source` node; with none, the graph goes straight to normalize.
 3. **source**: runs one adapter via `run_adapter`, which never raises (per-adapter timeout, default 8s). One slow or failing source must never fail the request.
-4. **normalize**: clean HTML to text, truncate snippets, canonicalize URLs (`clean_url`), DOIs and arXiv ids (`footnote/identifiers.py`).
-5. **dedupe**: union-find over DOI, arXiv ID, PMID and canonical URL, then near-duplicate titles (same family, ≥25 chars, `difflib` ratio ≥ 0.92; two published works with different DOIs never merge). Syndicated news (same wire story on several outlets) collapses to one result that keeps all outlet URLs; a preprint merges into its published version.
-6. **enrich**: Crossref DOI lookups fill missing date, citations, venue, authors (ranking gaps first; max 20 lookups, 5 concurrent). Never fails the request.
-7. **rank**: score = relevance × trust weight (from config) × quality. Relevance is one batched `fast`-LLM call scoring 0–10 (`prompts/rank.md`); below 3/10 is dropped; if the call fails, word overlap stands in and nothing is dropped. Quality is recency for news (30-day half-life, ignored inside a requested time window) and citation count for academic (new papers not penalized; preprints ×0.85). Keep top N (default 12).
-8. **synthesize** (`strong` LLM): write the answer using only the ranked results. Every factual sentence carries one or more `[n]` citations. If sources disagree, say so and cite both sides. If evidence is insufficient, say that rather than filling gaps from model knowledge.
-9. **verify** (`strong` LLM, separate call): check each cited sentence against its cited snippets; remove or flag unsupported claims; drop citations that point to non-existent indices.
+4. **normalize**: clean HTML to text, truncate snippets, canonicalize URLs (`clean_url` in `footnote/identifiers.py`).
+5. **dedupe**: union-find over canonical URL (including alternate URLs), then near-duplicate titles (same family, ≥25 chars, outlet suffix stripped, `difflib` ratio ≥ 0.92). Syndicated news (same wire story on several outlets) collapses to one result that keeps all outlet URLs.
+6. **rank**: score = relevance × trust weight (from config) × quality. Relevance is one batched `fast`-LLM call scoring 0–10 (`prompts/rank.md`); below 3/10 is dropped; if the call fails, word overlap stands in and nothing is dropped. Quality is recency (30-day half-life, ignored inside a requested time window). Keep top N (default 12).
+7. **synthesize** (`strong` LLM): write the answer using only the ranked results. Every factual sentence carries one or more `[n]` citations. If sources disagree, say so and cite both sides. If evidence is insufficient, say that rather than filling gaps from model knowledge.
+8. **verify** (`strong` LLM, separate call): check each cited sentence against its cited snippets; remove or flag unsupported claims; drop citations that point to non-existent indices.
 
 ### Graph state
 
-Defined in `footnote/graph/state.py` as a `TypedDict` with reducers for list fields that adapters append to in parallel (`results: Annotated[list[SourceResult], operator.add]`). `candidates` holds the normalized/deduped/enriched list and `ranked` the final numbered sources. Also tracks `errors` per adapter and `timings` for observability. The `source` node takes a `SourceTask` (`adapter_id`, `plan`) instead of the graph state.
+Defined in `footnote/graph/state.py` as a `TypedDict` with reducers for list fields that adapters append to in parallel (`results: Annotated[list[SourceResult], operator.add]`). `candidates` holds the normalized/deduped list and `ranked` the final numbered sources. Also tracks `errors` per adapter and `timings` for observability. The `source` node takes a `SourceTask` (`adapter_id`, `plan`) instead of the graph state.
 
 ## Sources
 
 All sources are declared in `config/sources.yaml`; adapters are registered by `id`. Adding a source = a `NativeAdapter` subclass decorated with `@register("<id>")` (set `requires_key` if it needs one; override `accepts` if it only fits some plans), an import in `footnote/sources/__init__.py`, a YAML entry, and respx tests against a fixture. Record fixtures from the real API where possible. Adapters whose key is missing are skipped at startup and reported `false` in `/health`. Every adapter is wrapped in `CachedAdapter` (successful searches only; keys are hashed).
-
-### Academic (native APIs)
-| id | Notes |
-|---|---|
-| `openalex` | Broad coverage, free, no key; send `mailto` for the polite pool. |
-| `semantic_scholar` | Citation counts, abstracts; API key optional. Keyless shared pool is often 429 → only one query per search without a key. |
-| `pubmed` | NCBI E-utilities (`esearch` + `efetch` XML); API key raises the rate limit. Only runs when `plan.biomedical`; all rewrites OR'd into one esearch. |
-| `arxiv` | Atom API, one request per search (all rewrites OR'd, terms AND'd). Always `is_preprint`; mark as **preprint** in UI and in synthesis. |
-| `crossref` | `kind: enrichment`: DOI metadata fallback in the enrich step, not searched. |
 
 ### News (native APIs)
 | id | Notes |
@@ -83,18 +73,18 @@ All sources are declared in `config/sources.yaml`; adapters are registered by `i
 ### Search API (domain-restricted)
 - Provider behind a `WebSearchProvider` interface (Tavily, Exa or Brave; chosen via `SEARCH_PROVIDER`).
 - Always pass the domain whitelist from `sources.yaml` (`include_domains` or equivalent). After the call, **re-check every URL against the whitelist** and drop anything that doesn't match; never trust the provider's filter alone.
-- Initial news whitelist: reuters.com, apnews.com, bbc.com/bbc.co.uk, npr.org, theguardian.com, nytimes.com, wsj.com, ft.com, economist.com, bloomberg.com. Academic whitelist adds nature.com, science.org, thelancet.com, nejm.org, cell.com, pnas.org, plos.org.
+- Initial news whitelist: reuters.com, apnews.com, bbc.com/bbc.co.uk, npr.org, theguardian.com, nytimes.com, wsj.com, ft.com, economist.com, bloomberg.com.
 
 ### `sources.yaml` shape
 
 ```yaml
 sources:
-  - id: openalex
-    family: academic
-    kind: native        # native | search | enrichment
-    trust: 0.9          # 0–1, used in ranking
+  - id: guardian
+    family: news
+    kind: native        # native | search
+    trust: 0.85         # 0–1, used in ranking
     enabled: true
-    rate_limit_per_sec: 10
+    rate_limit_per_sec: 1
   - id: reuters
     family: news
     kind: search
@@ -105,8 +95,8 @@ sources:
 
 ## Data models (`footnote/models.py`)
 
-- `QueryPlan`: `intent` (news | academic | both), `queries: dict[family, list[str]]`, `time_window: tuple[date, date] | None`, `entities: list[str]`, `biomedical: bool`. (The LLM fills a flat `PlanOutput`, since nested dicts/tuples trip up some providers, and `build_plan` converts it.)
-- `SourceResult`: `id` (stable hash), `source_id`, `family`, `title`, `url`, `alt_urls`, `snippet`, `published_at`, `authors`, `venue`, `doi`, `arxiv_id`, `pmid`, `citation_count`, `is_preprint`, `trust`, `score`.
+- `QueryPlan`: `queries: dict[family, list[str]]`, `time_window: tuple[date, date] | None`, `entities: list[str]`. (The LLM fills a flat `PlanOutput`, since nested dicts/tuples trip up some providers, and `build_plan` converts it.)
+- `SourceResult`: `id` (stable hash of the URL), `source_id`, `family`, `title`, `url`, `alt_urls`, `snippet`, `published_at`, `authors`, `venue` (outlet), `trust`, `score`.
 - `Citation`: `index`, `result_id`.
 - `Answer`: `text` (markdown with `[n]` markers), `citations: list[Citation]`, `sources: list[SourceResult]`, `unsupported_claims_removed: int`, `source_errors: dict[str, str]`, `timings_ms: dict[str, int]`.
 
@@ -114,7 +104,7 @@ sources:
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/search` | Body `{question, families?, max_results?, time_window?}` → `Answer` JSON. |
+| `POST` | `/api/search` | Body `{question, max_results?, time_window?}` → `Answer` JSON. |
 | `GET` | `/api/search/stream?q=…` | SSE events: `plan`, `source_started`, `source_done`, `source_error`, `ranked`, `token`, `answer`, `done`. |
 | `GET` | `/api/sources` | Enabled sources with family and trust weight. |
 | `GET` | `/health` | Liveness, plus which sources have credentials configured. |
@@ -124,7 +114,7 @@ Validation: question 3–500 chars; reject empty plans with a 422 and a helpful 
 
 ## Web UI
 
-One page: search box, family toggles (News / Academic), live list of sources as they report back (with status and result count), the streamed answer with clickable `[n]` citations that scroll to the matching source card, and source cards showing title, outlet/venue, date, preprint badge, and link. Show per-source errors quietly (e.g. "PubMed timed out") rather than failing the page. Must work at phone width.
+One page: search box, live list of sources as they report back (with status and result count), the streamed answer with clickable `[n]` citations that scroll to the matching source card, and source cards showing title, outlet, date, and link. Show per-source errors quietly (e.g. "NYT timed out") rather than failing the page. Must work at phone width.
 
 ## Safety and trust rules (non-negotiable)
 
@@ -143,7 +133,7 @@ footnote/
   llm.py               # provider-agnostic model factory (fast/strong)
   models.py
   whitelist.py         # URL/domain whitelist checks (security-critical; keep tested)
-  identifiers.py       # DOI / arXiv id / URL normalization (clean_url for display, url_key for dedupe)
+  identifiers.py       # URL normalization (clean_url for display, url_key for dedupe)
   text.py              # html_to_text, truncate, content_words
   citations.py         # deterministic [n] marker cleanup, shared by synthesize/verify
   cache.py             # Cache protocol + TTLCache (values must be JSON-serializable)
@@ -152,13 +142,12 @@ footnote/
   graph/
     state.py           # GraphState, SourceTask, Node/SourceNode protocols, @timed
     build.py           # graph construction
-    nodes/             # plan, fan_out (+ source), normalize, dedupe, enrich, rank, synthesize, verify
+    nodes/             # plan, fan_out (+ source), normalize, dedupe, rank, synthesize, verify
   sources/
-    __init__.py        # build_adapters, build_enricher, source_status (imports register adapters)
+    __init__.py        # build_adapters, source_status (imports register adapters)
     base.py            # SourceAdapter protocol, NativeAdapter base, registry, run_adapter, AdapterError
     cached.py          # CachedAdapter
     parsing.py         # parse_iso_date, first_text
-    academic/          # openalex.py, semantic_scholar.py, pubmed.py, arxiv.py, crossref.py (enricher)
     news/              # guardian.py, nyt.py, gdelt.py
     search/            # provider interface + tavily.py / exa.py / brave.py
   prompts/             # plan.md, rank.md, synthesize.md, verify.md + load_prompt(), source_blocks()
@@ -172,7 +161,7 @@ tests/
 
 ## Environment variables
 
-`LLM_PROVIDER`, `LLM_MODEL_FAST`, `LLM_MODEL_STRONG`, provider API key(s), `SEARCH_PROVIDER`, `SEARCH_API_KEY`, `OPENALEX_API_KEY` (optional), `GUARDIAN_API_KEY`, `NYT_API_KEY`, `NCBI_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY`, `CONTACT_EMAIL`, `CACHE_TTL_SECONDS` (default 900), `ADAPTER_TIMEOUT_SECONDS` (default 8), `HTTP_MAX_RETRIES` (default 2), `SEARCH_RATE_LIMIT_PER_MINUTE` (default 30; 0 disables), `LOG_LEVEL` (default INFO), `LOG_FORMAT` (text | json). Provide `.env.example`; never commit `.env`.
+`LLM_PROVIDER`, `LLM_MODEL_FAST`, `LLM_MODEL_STRONG`, `LLM_BASE_URL` (optional; e.g. LM Studio or Ollama Cloud), `LLM_STRUCTURED_OUTPUT_METHOD` (optional; `function_calling` for servers that ignore JSON schemas), provider API key(s), `SEARCH_PROVIDER`, `SEARCH_API_KEY`, `GUARDIAN_API_KEY`, `NYT_API_KEY`, `CONTACT_EMAIL`, `CACHE_TTL_SECONDS` (default 900), `ADAPTER_TIMEOUT_SECONDS` (default 8), `HTTP_MAX_RETRIES` (default 2), `SEARCH_RATE_LIMIT_PER_MINUTE` (default 30; 0 disables), `LOG_LEVEL` (default INFO), `LOG_FORMAT` (text | json). Provide `.env.example`; never commit `.env`.
 
 ## Commands
 
@@ -198,11 +187,11 @@ uv run python -m tests.evals.run         # eval suite (hits real APIs; needs key
 
 ## Evaluation
 
-`tests/evals/questions.yaml`: ~30 golden questions split across recent news, established science, contested topics, and questions with no good trusted answer. Score each run on: citation precision (cited snippet supports the claim), source diversity, whitelist violations (must be 0), "insufficient evidence" correctness, and latency p50/p95. Track results in `tests/evals/results/`.
+`tests/evals/questions.yaml`: ~30 golden questions split across recent news, established science (as covered by news outlets), contested topics, and questions with no good trusted answer. Score each run on: citation precision (cited snippet supports the claim), source diversity, whitelist violations (must be 0), "insufficient evidence" correctness, and latency p50/p95. Track results in `tests/evals/results/`.
 
 ## Milestones
 
-1. Skeleton: config, models, LLM factory, one academic adapter (OpenAlex) and one search provider, linear graph, `POST /api/search`.
+1. Skeleton: config, models, LLM factory, one native adapter and one search provider, linear graph, `POST /api/search`.
 2. All adapters, parallel fan-out, dedupe and ranking, caching.
 3. Synthesis + verification with citation checks; eval suite.
 4. SSE streaming and web UI.
@@ -213,4 +202,4 @@ uv run python -m tests.evals.run         # eval suite (hits real APIs; needs key
 - **LLM provider and models** for `fast` and `strong` roles (not yet chosen; code must stay provider-agnostic until then).
 - ~~Which search API provider to use first~~: Tavily (Exa/Brave can follow behind `WebSearchProvider`).
 - ~~Embedding vs LLM relevance~~: LLM scoring with the `fast` model in v1 (keeps the code provider-agnostic).
-- Tuning to revisit with the eval suite: arXiv AND-ing up to 6 terms per rewrite may be too strict; the rank thresholds (`MIN_RELEVANCE`, half-life, citation curve) are first guesses.
+- Tuning to revisit with the eval suite: the rank thresholds (`MIN_RELEVANCE`, news half-life) are first guesses.

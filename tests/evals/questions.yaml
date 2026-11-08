@@ -2,7 +2,6 @@
 #
 #   category: recent_news | established_science | contested | no_good_answer
 #   insufficient: true when a correct answer says the trusted sources don't settle it
-#   families: optional override, as in POST /api/search
 #
 # Recent-news questions are phrased so they stay answerable as the news moves on; judge them
 # on citations and sourcing, not on a fixed fact.

@@ -29,7 +29,7 @@ class TavilyProvider:
     ) -> list[WebHit]:
         body: dict[str, Any] = {
             "query": query,
-            "topic": "news" if family == Family.NEWS else "general",
+            "topic": "news",
             "search_depth": "basic",
             "max_results": max_results,
             "include_domains": domains,

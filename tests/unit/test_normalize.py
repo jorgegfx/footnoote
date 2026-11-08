@@ -29,24 +29,20 @@ def test_normalize_result_drops_non_http_urls() -> None:
     assert normalize_result(make_result(1, url="javascript:alert(1)")) is None
 
 
-def test_normalize_result_canonicalizes_ids_and_urls() -> None:
+def test_normalize_result_canonicalizes_urls_and_text() -> None:
     result = normalize_result(
         make_result(
             1,
-            url="https://WWW.Nature.com/articles/x?utm_source=feed&id=2#section",
-            doi="https://doi.org/10.1038/ABC",
-            arxiv_id="2301.00001v3",
+            url="https://WWW.Reuters.com/world/x?utm_source=feed&id=2#section",
             authors=["<b>Ada</b> Lovelace", ""],
             snippet="<p>An &amp; B</p>",
         )
     )
     assert result is not None
-    assert result.url == "https://www.nature.com/articles/x?id=2"
-    assert result.doi == "10.1038/abc"
-    assert result.arxiv_id == "2301.00001"
+    assert result.url == "https://www.reuters.com/world/x?id=2"
     assert result.authors == ["Ada Lovelace"]
     assert result.snippet == "An & B"
-    assert result.id == result_id(doi="10.1038/abc", url=result.url)
+    assert result.id == result_id(result.url)
 
 
 async def test_normalize_keeps_order_and_drops_invalid() -> None:

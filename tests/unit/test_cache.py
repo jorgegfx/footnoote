@@ -41,13 +41,13 @@ async def test_zero_ttl_disables_caching() -> None:
 
 
 async def test_cached_adapter_reuses_results_per_query() -> None:
-    inner = StaticAdapter("openalex", Family.ACADEMIC, [make_result(1)])
+    inner = StaticAdapter("reuters", Family.NEWS, [make_result(1)])
     adapter = CachedAdapter(inner, TTLCache(), ttl_seconds=60)
-    plan = QueryPlan(intent="academic", queries={Family.ACADEMIC: ["q"]})
+    plan = QueryPlan(queries={Family.NEWS: ["q"]})
 
     first = await adapter.search(plan)
     second = await adapter.search(plan)
-    other = await adapter.search(plan.model_copy(update={"queries": {Family.ACADEMIC: ["q2"]}}))
+    other = await adapter.search(plan.model_copy(update={"queries": {Family.NEWS: ["q2"]}}))
 
     assert first == second == other
     assert len(inner.plans) == 2  # second call was a hit; different query was a miss
@@ -55,10 +55,10 @@ async def test_cached_adapter_reuses_results_per_query() -> None:
 
 
 async def test_cached_adapter_does_not_cache_failures() -> None:
-    inner = StaticAdapter("x", Family.ACADEMIC, error=RuntimeError("down"))
+    inner = StaticAdapter("x", Family.NEWS, error=RuntimeError("down"))
     cache = TTLCache()
     adapter = CachedAdapter(inner, cache, ttl_seconds=60)
-    plan = QueryPlan(intent="academic", queries={Family.ACADEMIC: ["q"]})
+    plan = QueryPlan(queries={Family.NEWS: ["q"]})
     for _ in range(2):
         with contextlib.suppress(RuntimeError):
             await adapter.search(plan)

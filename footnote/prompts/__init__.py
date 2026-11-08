@@ -32,7 +32,6 @@ def source_blocks(
             "index": str(index),
             "outlet": source.venue or source.source_id,
             "date": source.published_at.isoformat() if source.published_at else "unknown",
-            "preprint": str(source.is_preprint).lower(),
         }
         snippet = source.snippet
         if snippet_chars is not None:

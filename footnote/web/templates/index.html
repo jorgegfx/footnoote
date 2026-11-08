@@ -4,28 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Footnote</title>
-  <meta name="description" content="Answers from trusted news and academic sources, with citations.">
+  <meta name="description" content="Answers from trusted news sources, with citations.">
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}?v={{ version }}">
 </head>
 <body>
   <main class="page">
     <header class="masthead">
       <h1 class="brand">Footnote</h1>
-      <p class="tagline">Answers from trusted news and academic sources. Every claim is cited.</p>
+      <p class="tagline">Answers from trusted news sources. Every claim is cited.</p>
     </header>
 
     <form id="search" class="search" autocomplete="off">
       <label class="visually-hidden" for="q">Your question</label>
       <div class="search-row">
         <input id="q" name="q" type="search" minlength="3" maxlength="500" required
-               placeholder="Ask a question, e.g. Does intermittent fasting improve longevity?">
+               placeholder="Ask a question, e.g. What did the Fed decide at its last meeting?">
         <button type="submit" id="submit">Search</button>
       </div>
-      <fieldset class="families">
-        <legend class="visually-hidden">Source families</legend>
-        <label class="toggle"><input type="checkbox" name="family" value="news" checked> News</label>
-        <label class="toggle"><input type="checkbox" name="family" value="academic" checked> Academic</label>
-      </fieldset>
     </form>
 
     <p id="notice" class="notice" role="alert" hidden></p>

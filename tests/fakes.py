@@ -88,12 +88,12 @@ class StaticAdapter:
         return self.results
 
 
-def make_result(n: int, family: Family = Family.ACADEMIC, **overrides: Any) -> SourceResult:
+def make_result(n: int, **overrides: Any) -> SourceResult:
     fields: dict[str, Any] = {
-        "source_id": "openalex" if family == Family.ACADEMIC else "reuters",
-        "family": family,
+        "source_id": "reuters",
+        "family": Family.NEWS,
         "title": f"Result {n}",
-        "url": f"https://example.org/{family.value}/{n}",
+        "url": f"https://www.reuters.com/world/{n}",
         "snippet": f"Snippet for result {n}.",
         "trust": 0.9,
     }

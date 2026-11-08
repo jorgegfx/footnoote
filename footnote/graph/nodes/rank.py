@@ -1,8 +1,7 @@
 """rank: score = relevance × trust × quality, keep the top N.
 
 Relevance comes from one batched `fast`-model call (0–10 per candidate). If that call fails,
-word overlap with the question stands in so the request still succeeds. Quality is recency
-for news and citations/peer review for academic work.
+word overlap with the question stands in so the request still succeeds. Quality is recency.
 """
 
 import logging
@@ -15,8 +14,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from footnote.graph.state import GraphState, Node, timed
-from footnote.llm import ModelFactory
-from footnote.models import Family, QueryPlan, SourceResult
+from footnote.llm import ModelFactory, structured
+from footnote.models import QueryPlan, SourceResult
 from footnote.prompts import load_prompt, source_blocks
 from footnote.text import content_words
 
@@ -26,7 +25,6 @@ MAX_CANDIDATES = 40  # cap on what's sent for LLM scoring, chosen by trust × qu
 SCORING_SNIPPET_CHARS = 500
 MIN_RELEVANCE = 0.3  # LLM score 3/10; below this a result isn't evidence for the question
 NEWS_HALF_LIFE_DAYS = 30
-RECENT_PAPER_DAYS = 730  # new papers haven't had time to collect citations
 
 
 class RelevanceScore(BaseModel):
@@ -39,23 +37,13 @@ class RelevanceScores(BaseModel):
 
 
 def quality(result: SourceResult, plan: QueryPlan, today: date) -> float:
-    """0–1 multiplier. News: recency (unless the user fixed a time window).
-    Academic: citation count, with allowances for new papers and a preprint discount."""
-    if result.family == Family.NEWS:
-        if plan.time_window is not None:
-            return 1.0
-        if result.published_at is None:
-            return 0.7
-        age_days = max((today - result.published_at).days, 0)
-        return 0.4 + 0.6 * math.pow(0.5, age_days / NEWS_HALF_LIFE_DAYS)
-
-    if result.citation_count is None:
-        factor = 0.75
-    else:
-        factor = 0.6 + 0.4 * min(1.0, math.log10(1 + result.citation_count) / 3)  # 1000+ → 1.0
-        if result.published_at and (today - result.published_at).days < RECENT_PAPER_DAYS:
-            factor = max(factor, 0.8)
-    return factor * (0.85 if result.is_preprint else 1.0)
+    """0–1 recency multiplier, ignored when the user fixed a time window."""
+    if plan.time_window is not None:
+        return 1.0
+    if result.published_at is None:
+        return 0.7
+    age_days = max((today - result.published_at).days, 0)
+    return 0.4 + 0.6 * math.pow(0.5, age_days / NEWS_HALF_LIFE_DAYS)
 
 
 def lexical_relevance(question: str, result: SourceResult) -> float:
@@ -68,7 +56,7 @@ def lexical_relevance(question: str, result: SourceResult) -> float:
 async def llm_relevance(
     models: ModelFactory, question: str, candidates: Sequence[SourceResult]
 ) -> list[float]:
-    scorer = models("fast").with_structured_output(RelevanceScores)
+    scorer = structured(models("fast"), RelevanceScores)
     output = await scorer.ainvoke(
         [
             SystemMessage(load_prompt("rank").substitute()),
